@@ -159,7 +159,7 @@ static inline void
 rb_threadptr_tag_jump(rb_thread_t *th, int st)
 {
     th->state = st;
-    ruby_longjmp(th->tag->buf, 1);
+    ruby_longjmp((void**)th->tag->buf, 1);
 }
 
 /*

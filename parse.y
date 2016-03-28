@@ -469,6 +469,25 @@ static NODE *match_op_gen(struct parser_params*,NODE*,NODE*);
 static ID  *local_tbl_gen(struct parser_params*);
 #define local_tbl() local_tbl_gen(parser)
 
+/* TODO lpnguyen: look into removing this later, should not be needed after conservative gc changes */
+static NODE * newScopeNode(VALUE a, VALUE b, struct parser_params *parser)
+{
+    NODE *node = NEW_NODE(NODE_SCOPE,0,b,a);
+    RNODE(node)->u1.tbl = local_tbl_gen(parser);
+    return node;
+}
+
+/* TODO: lpnguyen remove this and code in node.h once we have conservative mark on omr objects going */
+/* previously NEW_SCOPE was defined in node.h, moved here for these chain of reasons
+ * 1.  Need to allocate the node before the omr buf returned by local_tbl_gen() as the node keeps the buff alive
+ * 2.  Can't do this using a macro, need to write a function to do this
+ * 3.  If written in node.h the static function ends up being compiled everywhere and fails on finding the magic "parser" 
+ * implicit variable
+ * 4.  Therefore need to move the static function to only places that uses it, parser.y
+ */
+#define NEW_SCOPE(a,b) newScopeNode((VALUE)a, (VALUE)b, parser)
+
+
 static void fixup_nodes(NODE **);
 
 static VALUE reg_compile_gen(struct parser_params*, VALUE, int);
@@ -2895,9 +2914,10 @@ primary		: literal
 			 *  e.each{|x| a, = x}
 			 */
 			ID id = internal_id();
-			ID *tbl = ALLOC_N(ID, 2);
+			ID *tbl;
 			NODE *m = NEW_ARGS_AUX(0, 0);
 			NODE *args, *scope;
+			tbl = alloc_omr_buffer(sizeof(ID) * 2);
 
 			if (nd_type($2) == NODE_MASGN) {
 			    /* if args.length == 1 && args[0].kind_of?(Array)
@@ -9812,7 +9832,7 @@ new_args_tail_gen(struct parser_params *parser, NODE *k, ID kr, ID b)
     struct rb_args_info *args;
     NODE *node;
 
-    args = ZALLOC(struct rb_args_info);
+	args = calloc_omr_buffer(1, sizeof(struct rb_args_info));
     node = NEW_NODE(NODE_ARGS, 0, 0, args);
 
     args->block_arg      = b;
@@ -10110,9 +10130,9 @@ local_tbl_gen(struct parser_params *parser)
     int cnt = cnt_args + cnt_vars;
     int i, j;
     ID *buf;
-
     if (cnt <= 0) return 0;
-    buf = ALLOC_N(ID, cnt + 1);
+
+	buf = alloc_omr_buffer(sizeof(ID) * (cnt + 1));
     MEMCPY(buf+1, lvtbl->args->tbl, ID, cnt_args);
     /* remove IDs duplicated to warn shadowing */
     for (i = 0, j = cnt_args+1; i < cnt_vars; ++i) {
@@ -10121,7 +10141,10 @@ local_tbl_gen(struct parser_params *parser)
 	    buf[j++] = id;
 	}
     }
-    if (--j < cnt) REALLOC_N(buf, ID, (cnt = j) + 1);
+
+    if (--j < cnt){
+	    buf = realloc_omr_buffer(buf, sizeof(ID) * ((cnt = j) + 1));
+    }
     buf[0] = cnt;
     return buf;
 }
@@ -10788,7 +10811,7 @@ rb_parser_malloc(struct parser_params *parser, size_t size)
 {
     size_t cnt = HEAPCNT(1, size);
     NODE *n = NEWHEAP();
-    void *ptr = xmalloc(size);
+    void *ptr = alloc_omr_buffer(size);
 
     return ADD2HEAP(n, cnt, ptr);
 }
@@ -10798,7 +10821,7 @@ rb_parser_calloc(struct parser_params *parser, size_t nelem, size_t size)
 {
     size_t cnt = HEAPCNT(nelem, size);
     NODE *n = NEWHEAP();
-    void *ptr = xcalloc(nelem, size);
+    void *ptr = calloc_omr_buffer(nelem, size);
 
     return ADD2HEAP(n, cnt, ptr);
 }
@@ -10819,7 +10842,7 @@ rb_parser_realloc(struct parser_params *parser, void *ptr, size_t size)
 	} while ((n = n->u2.node) != NULL);
     }
     n = NEWHEAP();
-    ptr = xrealloc(ptr, size);
+    ptr = realloc_omr_buffer(ptr, size);
     return ADD2HEAP(n, cnt, ptr);
 }
 
@@ -10836,7 +10859,6 @@ rb_parser_free(struct parser_params *parser, void *ptr)
 	}
 	prev = &n->u2.node;
     }
-    xfree(ptr);
 }
 #endif
 #endif

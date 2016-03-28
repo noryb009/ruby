@@ -430,8 +430,17 @@ struct RBignum {
 
 struct RRational {
     struct RBasic basic;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).
+     * Removing for now.
+     */
+    VALUE num;
+    VALUE den;
+#else /* OMR */
     const VALUE num;
     const VALUE den;
+#endif /* OMR */
 };
 
 #define RRATIONAL(obj) (R_CAST(RRational)(obj))
@@ -445,8 +454,17 @@ struct RFloat {
 
 struct RComplex {
     struct RBasic basic;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).
+     * Removing for now.
+     */
+    VALUE real;
+    VALUE imag;
+#else /* OMR */
     const VALUE real;
     const VALUE imag;
+#endif /* OMR */
 };
 
 #define RCOMPLEX(obj) (R_CAST(RComplex)(obj))
@@ -462,7 +480,15 @@ struct RHash {
     struct RBasic basic;
     struct st_table *ntbl;      /* possibly 0 */
     int iter_lev;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).
+     * Removing for now.
+     */
+    VALUE ifnone;
+#else
     const VALUE ifnone;
+#endif /* OMR */
 };
 
 #define RHASH(obj)   (R_CAST(RHash)(obj))
@@ -526,7 +552,17 @@ RCLASS_SET_SUPER(VALUE klass, VALUE super)
 struct vtm; /* defined by timev.h */
 
 /* array.c */
+
+#define ARY_SHARED_P(ary) \
+    (assert(!FL_TEST((ary), ELTS_SHARED) || !FL_TEST((ary), RARRAY_EMBED_FLAG)), \
+     FL_TEST((ary),ELTS_SHARED)!=0)
+
+#define ARY_EMBED_P(ary) \
+    (assert(!FL_TEST((ary), ELTS_SHARED) || !FL_TEST((ary), RARRAY_EMBED_FLAG)), \
+     FL_TEST((ary), RARRAY_EMBED_FLAG)!=0)
+
 VALUE rb_ary_last(int, const VALUE *, VALUE);
+
 void rb_ary_set_len(VALUE, long);
 void rb_ary_delete_same(VALUE, VALUE);
 VALUE rb_ary_tmp_new_fill(long capa);
@@ -613,7 +649,7 @@ enum ruby_preserved_encindex {
 #define rb_utf8_encindex()      ENCINDEX_UTF_8
 #define rb_usascii_encindex()   ENCINDEX_US_ASCII
 ID rb_id_encoding(void);
-void rb_gc_mark_encodings(void);
+void rb_gc_mark_encodings(rb_omr_markstate_t ms);
 rb_encoding *rb_enc_get_from_index(int index);
 int rb_encdb_replicate(const char *alias, const char *orig);
 int rb_encdb_alias(const char *alias, const char *orig);
@@ -648,7 +684,7 @@ VALUE rb_get_backtrace(VALUE info);
 
 /* eval_jump.c */
 void rb_call_end_proc(VALUE data);
-void rb_mark_end_proc(void);
+void rb_mark_end_proc (rb_omr_markstate_t ms);
 
 /* file.c */
 VALUE rb_home_dir_of(VALUE user, VALUE result);
@@ -695,7 +731,7 @@ void rb_copy_wb_protected_attribute(VALUE dest, VALUE obj);
 
 #if defined(HAVE_MALLOC_USABLE_SIZE) || defined(HAVE_MALLOC_SIZE) || defined(_WIN32)
 #define ruby_sized_xrealloc(ptr, new_size, old_size) ruby_xrealloc(ptr, new_size)
-#define ruby_sized_xrealloc2(ptr, new_count, element_size, old_count) ruby_xrealloc(ptr, new_count, element_size)
+#define ruby_sized_xrealloc2(ptr, new_count, element_size, old_count) ruby_xrealloc2(ptr, new_count, element_size)
 #define ruby_sized_xfree(ptr, size) ruby_xfree(ptr)
 #define SIZED_REALLOC_N(var,type,n,old_n) REALLOC_N(var, type, n)
 #else
@@ -978,6 +1014,7 @@ size_t rb_strftime(char *s, size_t maxsize, const char *format, rb_encoding *enc
 
 /* string.c */
 void Init_frozen_strings(void);
+st_table* rb_vm_fstring_table(void);
 VALUE rb_fstring(VALUE);
 VALUE rb_fstring_new(const char *ptr, long len);
 int rb_str_buf_cat_escaped_char(VALUE result, unsigned int c, int unicode_p);
@@ -1169,10 +1206,21 @@ VALUE rb_setup_fake_str(struct RString *fake_str, const char *name, long len, rb
 extern const signed char ruby_digit36_to_number_table[];
 extern unsigned long ruby_scan_digits(const char *str, ssize_t len, int base, size_t *retlen, int *overflow);
 
+#define SPLIT_IVAR_TBL
+/* variable.c */
+#if defined(SPLIT_IVAR_TBL)
+/* Try to keep this prime */
+#define IVAR_TBL_COUNT 17
+extern st_table *generic_iv_tbls[IVAR_TBL_COUNT];
+#else
+#define IVAR_TBL_COUNT 1
+extern st_table *generic_iv_tbl;
+#endif
+
 /* variable.c (export) */
-void rb_gc_mark_global_tbl(void);
-void rb_mark_generic_ivar(VALUE);
-void rb_mark_generic_ivar_tbl(void);
+void rb_gc_mark_global_tbl(rb_omr_markstate_t ms);
+void rb_mark_generic_ivar(rb_omr_markstate_t ms, VALUE);
+void rb_mark_generic_ivar_tbl(rb_omr_markstate_t ms);
 VALUE rb_const_missing(VALUE klass, VALUE name);
 
 int rb_st_insert_id_and_value(VALUE obj, st_table *tbl, ID key, VALUE value);

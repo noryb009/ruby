@@ -19,6 +19,11 @@
 #include "vm_core.h"
 #include "probes_helper.h"
 
+#if defined(OMR)
+#include "omrvm.h"
+#include "rbomrinit.h"
+#endif /* defined(OMR) */
+
 NORETURN(void rb_raise_jump(VALUE, VALUE));
 
 VALUE rb_eLocalJumpError;

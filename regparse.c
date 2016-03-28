@@ -240,7 +240,7 @@ onig_strcpy(UChar* dest, const UChar* src, const UChar* end)
 
 #ifdef USE_NAMED_GROUP
 static UChar*
-strdup_with_null(OnigEncoding enc, UChar* s, UChar* end)
+strdup_with_null(OnigEncoding enc, UChar* s, UChar* end, int heap_allocated)
 {
   ptrdiff_t slen;
   int term_len, i;
@@ -249,7 +249,11 @@ strdup_with_null(OnigEncoding enc, UChar* s, UChar* end)
   slen = end - s;
   term_len = ONIGENC_MBC_MINLEN(enc);
 
-  r = (UChar* )xmalloc(slen + term_len);
+  if (heap_allocated) {
+    r = (UChar* )alloc_omr_buffer(slen + term_len);
+  } else {
+    r = (UChar* )xmalloc(slen + term_len);
+  }
   CHECK_NULL_RETURN(r);
   xmemcpy(r, s, slen);
 
@@ -372,15 +376,19 @@ str_end_hash(st_data_t xp)
 }
 
 extern hash_table_type*
-onig_st_init_strend_table_with_size(st_index_t size)
+onig_st_init_strend_table_with_size(st_index_t size, int heap_allocated)
 {
   static const struct st_hash_type hashType = {
     str_end_cmp,
     str_end_hash,
   };
 
-  return (hash_table_type* )
-           onig_st_init_table_with_size(&hashType, size);
+  if (heap_allocated) {
+	  return (hash_table_type *)st_init_table_with_size_heapalloc(&hashType, size);
+  } else {
+	  return (hash_table_type *)onig_st_init_table_with_size(&hashType, size);
+  }
+
 }
 
 extern int
@@ -397,16 +405,20 @@ onig_st_lookup_strend(hash_table_type* table, const UChar* str_key,
 
 extern int
 onig_st_insert_strend(hash_table_type* table, const UChar* str_key,
-		      const UChar* end_key, hash_data_type value)
+		      const UChar* end_key, hash_data_type value, int heap_allocated )
 {
   st_str_end_key* key;
   int result;
 
-  key = (st_str_end_key* )xmalloc(sizeof(st_str_end_key));
+  if (heap_allocated) {
+    key = (st_str_end_key* )alloc_omr_buffer(sizeof(st_str_end_key));
+  }else {
+    key = (st_str_end_key* )xmalloc(sizeof(st_str_end_key));
+  }
   key->s   = (UChar* )str_key;
   key->end = (UChar* )end_key;
   result = onig_st_insert(table, (st_data_t )key, value);
-  if (result) {
+  if (result && !heap_allocated) {
     xfree(key);
   }
   return result;
@@ -419,19 +431,7 @@ onig_st_insert_strend(hash_table_type* table, const UChar* str_key,
 
 #define INIT_NAME_BACKREFS_ALLOC_NUM   8
 
-typedef struct {
-  UChar* name;
-  size_t name_len;   /* byte length */
-  int    back_num;   /* number of backrefs */
-  int    back_alloc;
-  int    back_ref1;
-  int*   back_refs;
-} NameEntry;
-
 #ifdef USE_ST_LIBRARY
-
-typedef st_table  NameTable;
-typedef st_data_t HashDataType;   /* 1.6 st.h doesn't define st_data_t type */
 
 #ifdef ONIG_DEBUG
 static int
@@ -484,7 +484,7 @@ names_clear(regex_t* reg)
 {
   NameTable* t = (NameTable* )reg->name_table;
 
-  if (IS_NOT_NULL(t)) {
+  if (IS_NOT_NULL(t) && !reg->heap_allocated) {
     onig_st_foreach(t, i_free_name_entry, 0);
   }
   return 0;
@@ -751,19 +751,26 @@ name_add(regex_t* reg, UChar* name, UChar* name_end, int backref, ScanEnv* env)
   if (IS_NULL(e)) {
 #ifdef USE_ST_LIBRARY
     if (IS_NULL(t)) {
-      t = onig_st_init_strend_table_with_size(5);
+      t = onig_st_init_strend_table_with_size(5, reg->heap_allocated);
       reg->name_table = (void* )t;
     }
-    e = (NameEntry* )xmalloc(sizeof(NameEntry));
+    if (reg->heap_allocated) {
+    	e = alloc_omr_buffer(sizeof(NameEntry));
+    } else {
+    	e = (NameEntry* )xmalloc(sizeof(NameEntry));
+    }
+
     CHECK_NULL_RETURN_MEMERR(e);
 
-    e->name = strdup_with_null(reg->enc, name, name_end);
+    e->name = strdup_with_null(reg->enc, name, name_end, reg->heap_allocated);
     if (IS_NULL(e->name)) {
-      xfree(e);
+    	if (!reg->heap_allocated) {
+    		xfree(e);
+    	}
       return ONIGERR_MEMORY;
     }
     onig_st_insert_strend(t, e->name, (e->name + (name_end - name)),
-                          (HashDataType )e);
+                          (HashDataType )e, reg->heap_allocated);
 
     e->name_len   = name_end - name;
     e->back_num   = 0;
@@ -830,7 +837,11 @@ name_add(regex_t* reg, UChar* name, UChar* name_end, int backref, ScanEnv* env)
   else {
     if (e->back_num == 2) {
       alloc = INIT_NAME_BACKREFS_ALLOC_NUM;
-      e->back_refs = (int* )xmalloc(sizeof(int) * alloc);
+      if (reg->heap_allocated) {
+        e->back_refs = (int* )alloc_omr_buffer(sizeof(int) * alloc);
+      } else {
+        e->back_refs = (int* )xmalloc(sizeof(int) * alloc);
+      }
       CHECK_NULL_RETURN_MEMERR(e->back_refs);
       e->back_alloc = alloc;
       e->back_refs[0] = e->back_ref1;
@@ -840,7 +851,11 @@ name_add(regex_t* reg, UChar* name, UChar* name_end, int backref, ScanEnv* env)
       if (e->back_num > e->back_alloc) {
 	int* p;
 	alloc = e->back_alloc * 2;
-	p = (int* )xrealloc(e->back_refs, sizeof(int) * alloc);
+	if (reg->heap_allocated) {
+		p = (int* )realloc_omr_buffer(e->back_refs, sizeof(int) * alloc);
+	} else {
+		p = (int* )xrealloc(e->back_refs, sizeof(int) * alloc);
+	}
 	CHECK_NULL_RETURN_MEMERR(p);
 	e->back_refs = p;
 	e->back_alloc = alloc;

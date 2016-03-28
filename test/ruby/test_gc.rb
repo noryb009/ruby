@@ -51,6 +51,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_start_full_mark
+    skip "OMRTODO: Test disabled. objspase->profile is not currently supported in OMR GC, since it's filled out in stock Ruby sweep phase."
     return unless use_rgengc?
 
     GC.start(full_mark: false)
@@ -61,6 +62,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_start_immediate_sweep
+    skip "OMR GC does not suppot lazy sweeping."
     GC.start(immediate_sweep: false)
     assert_equal false, GC.latest_gc_info(:immediate_sweep)
 
@@ -75,6 +77,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_stat
+    skip "OMR GC does not support heap free slot counting."
     res = GC.stat
     assert_equal(false, res.empty?)
     assert_kind_of(Integer, res[:count])
@@ -110,6 +113,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_stat_constraints
+    skip "OMRTODO: Test disabled. Most of gc stat symbols don't make sense in OMR GC. [gc.c: setup_gc_stat_symbols()]"
     stat = GC.stat
     assert_equal stat[:total_allocated_pages], stat[:heap_allocated_pages] + stat[:total_freed_pages]
     assert_operator stat[:heap_sorted_length], :>=, stat[:heap_eden_pages] + stat[:heap_allocatable_pages], "stat is: " + stat.inspect
@@ -123,6 +127,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_latest_gc_info
+    skip "OMR GC does not support heap free slot counting"
     assert_separately %w[--disable-gem], __FILE__, __LINE__, <<-'eom'
     GC.start
     count = GC.stat(:heap_free_slots) + GC.stat(:heap_allocatable_pages) * GC::INTERNAL_CONSTANTS[:HEAP_OBJ_LIMIT]
@@ -179,6 +184,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_gc_parameter
+    skip "RUBY_GC_HEAP_INIT_SLOTS not supported"
     env = {
       "RUBY_GC_MALLOC_LIMIT" => "60000000",
       "RUBY_GC_HEAP_INIT_SLOTS" => "100000"
@@ -252,6 +258,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_profiler_clear
+    skip "OMRTODO: Test disabled. objspase->profile is not currently supported in OMR GC, since it's filled out in stock Ruby sweep phase."
     assert_separately %w[--disable-gem], __FILE__, __LINE__, <<-'eom'
     GC::Profiler.enable
 
@@ -284,6 +291,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_expand_heap
+    skip "OMR GC does not support page statistics."
     assert_separately %w[--disable-gem], __FILE__, __LINE__, <<-'eom'
     GC.start
     base_length = GC.stat[:heap_eden_pages]
@@ -300,6 +308,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_gc_internals
+    skip "OMR GC does not provide a HEAP_OBJ_LIMIT constant"
     assert_not_nil GC::INTERNAL_CONSTANTS[:HEAP_OBJ_LIMIT]
     assert_not_nil GC::INTERNAL_CONSTANTS[:RVALUE_SIZE]
   end
@@ -357,6 +366,7 @@ class TestGc < Test::Unit::TestCase
   end
 
   def test_verify_internal_consistency
+    skip "OMRTODO: Test disabled. verify_internal_consistency is not supported in OMR GC."
     assert_nil(GC.verify_internal_consistency)
   end
 

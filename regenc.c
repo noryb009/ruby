@@ -933,13 +933,13 @@ onigenc_property_list_add_property(UChar* name, const OnigCodePoint* prop,
   (*plist)[*pnum] = prop;
 
   if (ONIG_IS_NULL(*table)) {
-    *table = onig_st_init_strend_table_with_size(PROP_INIT_SIZE);
+    *table = onig_st_init_strend_table_with_size(PROP_INIT_SIZE, FALSE);
     if (ONIG_IS_NULL(*table)) return ONIGERR_MEMORY;
   }
 
   *pnum = *pnum + 1;
   onig_st_insert_strend(*table, name, name + strlen((char* )name),
-			(hash_data_type )(*pnum + ONIGENC_MAX_STD_CTYPE));
+			(hash_data_type )(*pnum + ONIGENC_MAX_STD_CTYPE), FALSE);
   return 0;
 }
 

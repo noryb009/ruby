@@ -9,6 +9,7 @@
 
 **********************************************************************/
 
+#include "rbgcsupport.h"
 #include "eval_intern.h"
 #include "internal.h"
 #include "gc.h"
@@ -42,14 +43,15 @@ static int method_min_max_arity(VALUE, int *max);
 static void
 proc_mark(void *ptr)
 {
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
     rb_proc_t *proc = ptr;
     RUBY_MARK_ENTER("proc");
-    RUBY_MARK_UNLESS_NULL(proc->envval);
-    RUBY_MARK_UNLESS_NULL(proc->blockprocval);
-    RUBY_MARK_UNLESS_NULL(proc->block.proc);
-    RUBY_MARK_UNLESS_NULL(proc->block.self);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, proc->envval);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, proc->blockprocval);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, proc->block.proc);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, proc->block.self);
     if (proc->block.iseq && RUBY_VM_IFUNC_P(proc->block.iseq)) {
-	RUBY_MARK_UNLESS_NULL((VALUE)(proc->block.iseq));
+	RUBY_OMR_MARK_UNLESS_NULL(ms, (VALUE)(proc->block.iseq));
     }
     RUBY_MARK_LEAVE("proc");
 }
@@ -64,10 +66,10 @@ static const rb_data_type_t proc_data_type = {
     "proc",
     {
 	proc_mark,
-	RUBY_TYPED_DEFAULT_FREE,
+	0,
 	proc_memsize,
     },
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 VALUE
@@ -95,7 +97,7 @@ proc_dup(VALUE self)
 {
     VALUE procval;
     rb_proc_t *src;
-    rb_proc_t *dst = ALLOC(rb_proc_t);
+    rb_proc_t *dst = alloc_omr_buffer(sizeof(rb_proc_t));
 
     GetProcPtr(self, src);
     *dst = *src;

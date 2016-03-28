@@ -70,6 +70,9 @@ enum disable_flag_bits {
 enum dump_flag_bits {
     dump_version,
     dump_version_v,
+#if defined(OMR)
+    dump_version_omr,
+#endif /* OMR */
     dump_copyright,
     dump_usage,
     dump_help,
@@ -796,6 +799,9 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
 	  case 'v':
 	    if (opt->verbose) {
 		s++;
+#if defined(OMR)
+		opt->dump |= DUMP_BIT(version_omr);
+#endif /* OMR */
 		goto reswitch;
 	    }
 	    opt->dump |= DUMP_BIT(version_v);
@@ -1318,6 +1324,11 @@ process_options(int argc, char **argv, struct cmdline_options *opt)
 
     if (opt->dump & (DUMP_BIT(version) | DUMP_BIT(version_v))) {
 	ruby_show_version();
+#if defined(OMR)
+	if (opt->dump & DUMP_BIT(version_omr)) {
+	    ruby_show_omr_version();
+	}
+#endif /* OMR */
 	if (opt->dump & DUMP_BIT(version)) return Qtrue;
     }
     if (opt->dump & DUMP_BIT(copyright)) {

@@ -63,6 +63,7 @@ class TestProcess < Test::Unit::TestCase
   end
 
   def test_rlimit_nofile
+    skip "OMRTODO: Test disabled. In OMR, GC is shutdown by calling pthread_exit, which tries to load libgcc_s.so after rlimit is set to be a small number. Program is aborted since the number of file descriptors exceeds rlimit."
     return unless rlimit_exist?
     with_tmpchdir {
       write_file 's', <<-"End"
@@ -1595,6 +1596,7 @@ class TestProcess < Test::Unit::TestCase
 
     if File.directory?("/proc/self/task") && /netbsd[a-z]*[1-6]/ !~ RUBY_PLATFORM
       def test_daemon_no_threads
+        skip "OMRTODO: Test disabled. In OMR, there are 3 additional GC threads."
         pid, data = IO.popen("-", "r+") do |f|
           break f.pid, f.readlines if f
           Process.daemon(true, true)

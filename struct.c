@@ -172,10 +172,11 @@ new_struct(VALUE name, VALUE super)
     return rb_define_class_id_under(super, id, super);
 }
 
+rb_control_frame_t *FUNC_FASTCALL(rb_vm_opt_struct_aref)(rb_thread_t *, rb_control_frame_t *);
+
 static void
 define_aref_method(VALUE nstr, VALUE name, VALUE off)
 {
-    rb_control_frame_t *FUNC_FASTCALL(rb_vm_opt_struct_aref)(rb_thread_t *, rb_control_frame_t *);
     VALUE iseqval = rb_method_for_self_aref(name, off, rb_vm_opt_struct_aref);
     rb_iseq_t *iseq = DATA_PTR(iseqval);
 
@@ -183,10 +184,11 @@ define_aref_method(VALUE nstr, VALUE name, VALUE off)
     RB_GC_GUARD(iseqval);
 }
 
+rb_control_frame_t *FUNC_FASTCALL(rb_vm_opt_struct_aset)(rb_thread_t *, rb_control_frame_t *);
+
 static void
 define_aset_method(VALUE nstr, VALUE name, VALUE off)
 {
-    rb_control_frame_t *FUNC_FASTCALL(rb_vm_opt_struct_aset)(rb_thread_t *, rb_control_frame_t *);
     VALUE iseqval = rb_method_for_self_aset(name, off, rb_vm_opt_struct_aset);
     rb_iseq_t *iseq = DATA_PTR(iseqval);
 
@@ -476,7 +478,7 @@ struct_alloc(VALUE klass)
 	rb_mem_clear((VALUE *)st->as.ary, n);
     }
     else {
-	st->as.heap.ptr = ALLOC_N(VALUE, n);
+	st->as.heap.ptr = alloc_omr_buffer(sizeof(VALUE)*n);
 	rb_mem_clear((VALUE *)st->as.heap.ptr, n);
 	st->as.heap.len = n;
     }

@@ -692,7 +692,7 @@ if $configure_only and $command_output
 
     mf.macro "extensions", exts
     mf.macro "EXTOBJS", $extlist.empty? ? ["dmyext.#{$OBJEXT}"] : ["ext/extinit.#{$OBJEXT}", *$extobjs]
-    mf.macro "EXTLIBS", $extlibs
+    mf.macro "EXTLIBS", $extlibs + CONFIG["OMRLIB"].split
     mf.macro "EXTLDFLAGS", $extflags.split
     submakeopts = []
     if enable_config("shared", $enable_shared)

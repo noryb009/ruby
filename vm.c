@@ -18,6 +18,16 @@
 #include "eval_intern.h"
 #include "probes.h"
 #include "probes_helper.h"
+#include "jit.h"
+
+#if defined(OMR)
+#include "omr.h"
+#include "omrvm.h"
+#include "rbgcsupport.h"
+#include "rbomrinit.h"
+#include "mminitcore.h"
+#include "rbomrprofiler.h"
+#endif /* defined(OMR) */
 
 static inline VALUE *
 VM_EP_LEP(VALUE *ep)
@@ -103,6 +113,7 @@ static rb_serial_t ruby_vm_class_serial = 1;
 
 #include <assert.h>
 
+#define BUFSIZE 0x100
 #define PROCDEBUG 0
 
 rb_serial_t
@@ -369,22 +380,23 @@ static void
 env_mark(void * const ptr)
 {
     const rb_env_t * const env = ptr;
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
 
     /* TODO: should mark more restricted range */
     RUBY_GC_INFO("env->env\n");
     rb_gc_mark_values((long)env->env_size, env->env);
 
     RUBY_GC_INFO("env->prev_envval\n");
-    RUBY_MARK_UNLESS_NULL(env->prev_envval);
-    RUBY_MARK_UNLESS_NULL(env->block.self);
-    RUBY_MARK_UNLESS_NULL(env->block.proc);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, env->prev_envval);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, env->block.self);
+    RUBY_OMR_MARK_UNLESS_NULL(ms, env->block.proc);
 
     if (env->block.iseq) {
 	if (RUBY_VM_IFUNC_P(env->block.iseq)) {
-	    RUBY_MARK_UNLESS_NULL((VALUE)env->block.iseq);
+	    RUBY_OMR_MARK_UNLESS_NULL(ms, (VALUE)env->block.iseq);
 	}
 	else {
-	    RUBY_MARK_UNLESS_NULL(env->block.iseq->self);
+	    RUBY_OMR_MARK_UNLESS_NULL(ms, env->block.iseq->self);
 	}
     }
     RUBY_MARK_LEAVE("env");
@@ -402,8 +414,12 @@ env_memsize(const void *ptr)
 
 static const rb_data_type_t env_data_type = {
     "VM/env",
-    {env_mark, RUBY_TYPED_DEFAULT_FREE, env_memsize,},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    {
+	env_mark,
+	0,
+	env_memsize,
+    },
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 static VALUE check_env_value(VALUE envval);
@@ -478,7 +494,7 @@ vm_make_env_each(const rb_thread_t *const th, rb_control_frame_t *const cfp,
     }
 
     /* allocate env */
-    env = xmalloc(sizeof(rb_env_t) + ((local_size + 1) * sizeof(VALUE)));
+    env = alloc_omr_buffer(sizeof(rb_env_t) + ((local_size + 1) * sizeof(VALUE)));
     env->env_size = local_size + 1 + 1;
     env->local_size = local_size;
 
@@ -631,7 +647,8 @@ rb_proc_alloc(VALUE klass, const rb_block_t *block,
 		int8_t safe_level, int8_t is_from_method, int8_t is_lambda)
 {
     VALUE procval;
-    rb_proc_t *proc = ALLOC(rb_proc_t);
+    rb_proc_t *proc = alloc_omr_buffer(sizeof(rb_proc_t));
+
 
     proc->block = *block;
     proc->safe_level = safe_level;
@@ -1421,6 +1438,40 @@ hook_before_rewind(rb_thread_t *th, rb_control_frame_t *cfp, int will_finish_vm_
   };
  */
 
+static inline VALUE
+vm_exec2(rb_thread_t *th, VALUE initial)
+{
+    VALUE result;
+#if defined(OMR_JIT)
+    /* The JIT is currently not able to support invocations of methods with a
+     * frame type of RESCUE.
+     *
+     * We check the frame type before checking if a method is has been jitted
+     * in order to avoid decrementing the compilation count and compiling a
+     * method if we're never going to be able to run it.
+     *
+     * FIXME: COMPJAZZ 119401: OMR: Ruby: count=1 failure  
+     *
+     *        The FINISH_P check below should be improved. Without the check, a
+     *        return from vm_exec_2 looks like an early exit from vm_exec_core,
+     *        causing a fallthrough to the `finish_vme` point.  
+     *
+     *        One option would be to reinvoke the interpreter loop, however,
+     *        early experimentation with this was unsuccessful. 
+     *
+     */
+    if (VM_FRAME_TYPE(th->cfp) != VM_FRAME_MAGIC_RESCUE && 
+        VM_FRAME_TYPE_FINISH_P(th->cfp) && 
+        vm_jitted_p(th, th->cfp->iseq) == Qtrue) { 
+	result = vm_exec_jitted(th);
+    }
+    else
+#endif
+	/* warning: dangling else above */
+	result = vm_exec_core(th, initial);
+    return result;
+}
+
 static VALUE
 vm_exec(rb_thread_t *th)
 {
@@ -1432,7 +1483,7 @@ vm_exec(rb_thread_t *th)
     _tag.retval = Qnil;
     if ((state = EXEC_TAG()) == 0) {
       vm_loop_start:
-	result = vm_exec_core(th, initial);
+	result = vm_exec2(th, initial);
 	if ((state = th->state) != 0) {
 	    err = result;
 	    th->state = 0;
@@ -1765,7 +1816,7 @@ rb_vm_call_cfunc(VALUE recv, VALUE (*func)(VALUE), VALUE arg,
 
 /* vm */
 
-void rb_vm_trace_mark_event_hooks(rb_hook_list_t *hooks);
+void rb_vm_trace_mark_event_hooks(rb_omr_markstate_t ms, rb_hook_list_t *hooks);
 
 void
 rb_vm_mark(void *ptr)
@@ -1778,30 +1829,38 @@ rb_vm_mark(void *ptr)
 	rb_vm_t *vm = ptr;
 	rb_thread_t *th = 0;
 
+	rb_omr_markstate_t ms = rb_omr_get_markstate();
+
 	list_for_each(&vm->living_threads, th, vmlt_node) {
 	    rb_gc_mark(th->self);
 	}
-	RUBY_MARK_UNLESS_NULL(vm->thgroup_default);
-	RUBY_MARK_UNLESS_NULL(vm->mark_object_ary);
-	RUBY_MARK_UNLESS_NULL(vm->load_path);
-	RUBY_MARK_UNLESS_NULL(vm->load_path_snapshot);
-	RUBY_MARK_UNLESS_NULL(vm->load_path_check_cache);
-	RUBY_MARK_UNLESS_NULL(vm->expanded_load_path);
-	RUBY_MARK_UNLESS_NULL(vm->loaded_features);
-	RUBY_MARK_UNLESS_NULL(vm->loaded_features_snapshot);
-	RUBY_MARK_UNLESS_NULL(vm->top_self);
-	RUBY_MARK_UNLESS_NULL(vm->coverages);
-	RUBY_MARK_UNLESS_NULL(vm->defined_module_hash);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->thgroup_default);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->mark_object_ary);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->load_path);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->load_path_snapshot);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->load_path_check_cache);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->expanded_load_path);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->loaded_features);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->loaded_features_snapshot);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->top_self);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->coverages);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, vm->defined_module_hash);
 
-	if (vm->loading_table) {
-	    rb_mark_tbl(vm->loading_table);
+#if defined(OMR)
+	if (vm->loaded_features_index != NULL) {
+	    rb_omr_mark_tbl(ms, vm->loaded_features_index);
 	}
 
-	rb_vm_trace_mark_event_hooks(&vm->event_hooks);
+	if (vm->loading_table) {
+	    rb_omr_mark_tbl(ms, vm->loading_table);
+	}
+#endif /* defined(OMR) */
+
+	rb_vm_trace_mark_event_hooks(ms, &vm->event_hooks);
 
 	for (i = 0; i < RUBY_NSIG; i++) {
 	    if (vm->trap_list[i].cmd)
-		rb_gc_mark(vm->trap_list[i].cmd);
+		rb_omr_mark(ms, vm->trap_list[i].cmd);
 	}
     }
 
@@ -1840,11 +1899,33 @@ ruby_vm_destruct(rb_vm_t *vm)
 	struct rb_objspace *objspace = vm->objspace;
 #endif
 	vm->main_thread = 0;
+
 	if (th) {
 	    rb_fiber_reset_root_local_storage(th->self);
+#if defined(OMR)
+            rb_omr_gc_shutdown_dispatcher_threads(th);
+            rb_omr_gc_shutdown_collector(th);
+            rb_omr_ras_shutdown(vm, th);
+
+	    omrthread_monitor_destroy(th->publicFlagsMutex);
+	    th->publicFlagsMutex = NULL;
+
+            if (NULL != vm->exclusiveAccessMutex) {
+                omrthread_monitor_destroy(vm->exclusiveAccessMutex);
+                vm->exclusiveAccessMutex = NULL;
+            }
+
+	    OMR_Thread_Free(th->_omrVMThread);
+	    th->_omrVMThread = NULL;
+#endif /* defined(OMR) */
 	    thread_free(th);
 	}
 	rb_vm_living_threads_init(vm);
+
+#if defined(OMR)
+        rb_omr_gc_shutdown_heap(vm);
+#endif /* OMR */
+
 	ruby_vm_run_at_exit_hooks(vm);
 	rb_vm_gvl_destroy(vm);
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
@@ -1852,7 +1933,14 @@ ruby_vm_destruct(rb_vm_t *vm)
 	    rb_objspace_free(objspace);
 	}
 #endif
+#if defined(JIT_INTERFACE)
+	vm_jit_destroy(vm);
+#endif
 	/* after freeing objspace, you *can't* use ruby_xfree() */
+#if defined(OMR)
+	OMR_Shutdown(vm->_omrVM);
+	rb_omr_free_finalizeList(vm);
+#endif /* defined(OMR) */
 	ruby_mimfree(vm);
 	ruby_current_vm = 0;
     }
@@ -1881,7 +1969,7 @@ vm_memsize(const void *ptr)
 
 static const rb_data_type_t vm_data_type = {
     "VM",
-    {NULL, NULL, vm_memsize,},
+    {rb_vm_mark, NULL, vm_memsize,},
     0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
@@ -1968,7 +2056,6 @@ vm_init2(rb_vm_t *vm)
     vm->src_encoding_index = -1;
     vm->at_exit.basic.flags = (T_ARRAY | RARRAY_EMBED_FLAG) & ~RARRAY_EMBED_LEN_MASK; /* len set 0 */
     rb_obj_hide((VALUE)&vm->at_exit);
-
     vm_default_params_setup(vm);
 }
 
@@ -2015,6 +2102,8 @@ void
 rb_thread_mark(void *ptr)
 {
     rb_thread_t *th = NULL;
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
+
     RUBY_MARK_ENTER("thread");
     if (ptr) {
 	th = ptr;
@@ -2028,11 +2117,11 @@ rb_thread_mark(void *ptr)
 
 	    while (cfp != limit_cfp) {
 		rb_iseq_t *iseq = cfp->iseq;
-		rb_gc_mark(cfp->proc);
-		rb_gc_mark(cfp->self);
-		rb_gc_mark(cfp->klass);
+		rb_omr_mark(ms, cfp->proc);
+		rb_omr_mark(ms, cfp->self);
+		rb_omr_mark(ms, cfp->klass);
 		if (iseq) {
-		    rb_gc_mark(RUBY_VM_NORMAL_ISEQ_P(iseq) ? iseq->self : (VALUE)iseq);
+		    rb_omr_mark(ms, RUBY_VM_NORMAL_ISEQ_P(iseq) ? iseq->self : (VALUE)iseq);
 		}
 		if (cfp->me) {
 		    /* bitmap marking `me' does not seem worth the trouble:
@@ -2045,27 +2134,27 @@ rb_thread_mark(void *ptr)
 	}
 
 	/* mark ruby objects */
-	RUBY_MARK_UNLESS_NULL(th->first_proc);
-	if (th->first_proc) RUBY_MARK_UNLESS_NULL(th->first_args);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->first_proc);
+	if (th->first_proc) RUBY_OMR_MARK_UNLESS_NULL(ms, th->first_args);
 
-	RUBY_MARK_UNLESS_NULL(th->thgroup);
-	RUBY_MARK_UNLESS_NULL(th->value);
-	RUBY_MARK_UNLESS_NULL(th->errinfo);
-	RUBY_MARK_UNLESS_NULL(th->pending_interrupt_queue);
-	RUBY_MARK_UNLESS_NULL(th->pending_interrupt_mask_stack);
-	RUBY_MARK_UNLESS_NULL(th->root_svar);
-	RUBY_MARK_UNLESS_NULL(th->top_self);
-	RUBY_MARK_UNLESS_NULL(th->top_wrapper);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->thgroup);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->value);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->errinfo);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->pending_interrupt_queue);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->pending_interrupt_mask_stack);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->root_svar);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->top_self);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->top_wrapper);
 	rb_fiber_mark_self(th->fiber);
 	rb_fiber_mark_self(th->root_fiber);
-	RUBY_MARK_UNLESS_NULL(th->stat_insn_usage);
-	RUBY_MARK_UNLESS_NULL(th->last_status);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->stat_insn_usage);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->last_status);
 
-	RUBY_MARK_UNLESS_NULL(th->locking_mutex);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->locking_mutex);
 
-	rb_mark_tbl(th->local_storage);
-	RUBY_MARK_UNLESS_NULL(th->local_storage_recursive_hash);
-	RUBY_MARK_UNLESS_NULL(th->local_storage_recursive_hash_for_trace);
+	rb_omr_mark_tbl(ms, th->local_storage);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->local_storage_recursive_hash);
+	RUBY_OMR_MARK_UNLESS_NULL(ms, th->local_storage_recursive_hash_for_trace);
 
 	if (GET_THREAD() != th && th->machine.stack_start && th->machine.stack_end) {
 	    rb_gc_mark_machine_stack(th);
@@ -2074,7 +2163,7 @@ rb_thread_mark(void *ptr)
 				 sizeof(th->machine.regs) / sizeof(VALUE));
 	}
 
-	rb_vm_trace_mark_event_hooks(&th->event_hooks);
+	rb_vm_trace_mark_event_hooks(ms, &th->event_hooks);
     }
 
     RUBY_MARK_LEAVE("thread");
@@ -2149,7 +2238,7 @@ const rb_data_type_t ruby_threadptr_data_type = {
 	thread_free,
 	thread_memsize,
     },
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_PARALLEL_FREE
 };
 
 VALUE
@@ -2199,6 +2288,9 @@ th_init(rb_thread_t *th, VALUE self)
     th->last_status = Qnil;
     th->waiting_fd = -1;
     th->root_svar = Qnil;
+#if defined(OMR) && defined(OMR_THR_FORK_SUPPORT)
+    th->bindAllocatedFlag = 0;
+#endif /* defined(OMR) && defined(OMR_THR_FORK_SUPPORT) */
     th->local_storage_recursive_hash = Qnil;
     th->local_storage_recursive_hash_for_trace = Qnil;
 #ifdef NON_SCALAR_THREAD_ID
@@ -2786,6 +2878,96 @@ struct rb_objspace *rb_objspace_alloc(void);
 void
 Init_BareVM(void)
 {
+#if defined(OMR)
+    rb_vm_t * vm = NULL;
+    rb_thread_t * th = NULL;
+    omrthread_t self = NULL;
+    jit_globals_t globals; 
+
+    /* Initialize Ruby VM. Requires nothing. */
+
+    vm = ruby_mimmalloc(sizeof(*vm));
+
+    if (NULL == vm) {
+        fprintf(stderr, "[FATAL] failed to allocate memory\n");
+        exit(EXIT_FAILURE);
+    }
+
+    vm_init2(vm); /* note: no current ruby thread yet! */
+    ruby_current_vm = vm;
+
+    /* Initialize OMR VM. Requires Ruby VM. */
+
+    if (0 != omrthread_attach(&self)) {
+        fprintf(stderr, "[FATAL] Failed to attach to omrthread.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (OMR_ERROR_NONE != OMR_Initialize(vm, &vm->_omrVM)) {
+        fprintf(stderr, "[FATAL] Failed to initialize OMR VM.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (OMR_ERROR_NONE != rb_omr_startup_traceengine(vm)) {
+    	fprintf(stderr,"[FATAL] Failed to start trace engine.\n");
+    	exit(EXIT_FAILURE);
+    }
+
+    /* Initialize OMR heap. Requires main Ruby VM. Requires omrthread attachment. */
+
+    if (OMR_ERROR_NONE != rb_omr_startup_gc(vm)) {
+        fprintf(stderr, "[FATAL] Failed to initialize OMR heap.\n");
+        exit(EXIT_FAILURE);
+    }
+
+#if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
+    vm->objspace = rb_objspace_alloc();
+#endif
+
+    /* Main thread initialization */
+
+    th = ruby_mimmalloc(sizeof(*th));
+    MEMZERO(th, rb_thread_t, 1);
+    rb_thread_set_current_raw(th);
+    Init_native_thread();
+    th->vm = vm;
+    th_init(th, 0);
+    ruby_thread_init_stack(th);
+    if (OMR_ERROR_NONE != rb_omr_thread_init(th, "ruby-main-thread")) {
+        fprintf(stderr,"[FATAL] Failed to attach ruby-main-thread.\n");
+        exit(EXIT_FAILURE);
+    }
+    if (OMR_ERROR_NONE != omrthread_monitor_init_with_name(&th->publicFlagsMutex, 0, "Thread flags mutex")) {
+        fprintf(stderr,"[FATAL] Failed to create public flags mutex for ruby-main-thread.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    rb_omr_init_finalizeList(th, vm);
+
+    /* Initialize OMR RAS modules. Requires OMR VM thread, both VMs. */
+    gcOmrInitializeTrace(th->_omrVMThread);
+
+    if (OMR_ERROR_NONE != rb_omr_startup_healthcenter(vm)) {
+    	fprintf(stderr,"[FATAL] Failed to load healthcenter agent.\n");
+    	exit(EXIT_FAILURE);
+    }
+
+    if (OMR_ERROR_NONE != rb_omr_startup_gc_threads(th)) {
+    	fprintf(stderr,"[FATAL] Failed to start GC slave threads.");
+    	exit(EXIT_FAILURE);
+    }
+    omrthread_detach(self);
+
+#if defined(OMR_JIT)
+    globals.ruby_vm_global_constant_state_ptr = &ruby_vm_global_constant_state;
+    globals.ruby_rb_mRubyVMFrozenCore_ptr     = &rb_mRubyVMFrozenCore;
+    globals.ruby_vm_event_flags_ptr           = &ruby_vm_event_flags;
+    globals.redefined_flag_ptr                = &(vm->redefined_flag);
+    vm_jit_init(vm, globals);
+#endif
+
+#else /* defined(OMR) */
+
     /* VM bootstrap: phase 1 */
     rb_vm_t * vm = ruby_mimmalloc(sizeof(*vm));
     rb_thread_t * th = ruby_mimmalloc(sizeof(*th));
@@ -2806,6 +2988,7 @@ Init_BareVM(void)
     th->vm = vm;
     th_init(th, 0);
     ruby_thread_init_stack(th);
+#endif
 }
 
 void
@@ -3082,4 +3265,108 @@ vm_collect_usage_register(int reg, int isset)
     if (ruby_vm_collect_usage_func_register)
 	(*ruby_vm_collect_usage_func_register)(reg, isset);
 }
+#endif
+
+
+extern VALUE rb_cMethod; 
+
+/* Mimics some logic in iseq.c:iseq_s_of(). That function could be refactored to
+ * support this...
+ */
+rb_iseq_t *
+get_iseq_from_value(VALUE klass, VALUE v) 
+{
+   rb_iseq_t * iseq;
+   rb_secure(1); 
+
+   if (rb_obj_is_proc(v)) { 
+      rb_proc_t *proc;
+      GetProcPtr(v, proc);
+      iseq = proc->block.iseq;
+      if (RUBY_VM_NORMAL_ISEQ_P(iseq)) {
+         return iseq;
+      }
+   }
+   else if ((iseq = rb_method_get_iseq(v)) != 0) {
+      return iseq;
+   }
+   return NULL;
+
+}
+/*
+ * call-seq:
+ *      RubyVM::JIT::exists? -> boolean
+ *
+ * Returns true if a JIT is loaded and actitve
+ */
+VALUE
+vm_jit_exists_p()
+{
+#if defined(JIT_INTERFACE)
+   rb_thread_t  *th;
+   th   = GET_THREAD();
+
+   if (th->vm->jit) return Qtrue;
+#endif
+   return Qfalse;
+}
+
+/*
+ * call-seq:
+ *    RubyVM::JIT::compiled?(method)   -> boolean 
+ *
+ * Returns true if the code associated with this method has been jitted. 
+ */
+VALUE
+vm_jit_compiled_p(VALUE klass, VALUE method)
+{
+#if defined(JIT_INTERFACE)
+   rb_iseq_t * iseq; 
+
+   iseq = get_iseq_from_value(klass,method);  
+   if (iseq && iseq->jit.state == ISEQ_JIT_STATE_JITTED)
+      return Qtrue; 
+#endif
+
+   return Qfalse; 
+
+
+}
+
+/*
+ * call-seq:
+ *    RubyVM::JIT::compile   -> boolean 
+ *
+ * Attempts to compile the method, and returns true if successful. 
+ *
+ */
+VALUE
+vm_jit_compile_method(VALUE klass, VALUE method)
+{
+#if defined(JIT_INTERFACE)
+   rb_iseq_t    *iseq; 
+   rb_thread_t  *th;
+
+   iseq = get_iseq_from_value(klass,method);
+   if (iseq) {
+      th   = GET_THREAD();
+      return vm_jit(th, iseq);   
+   }
+#endif
+   return Qfalse; 
+}
+
+VALUE rb_cJIT; 
+
+void Init_JIT(void)
+{ 
+   rb_cJIT = rb_define_class_under(rb_cRubyVM, "JIT", rb_cObject);    
+   rb_define_singleton_method(rb_cJIT, "exists?",   vm_jit_exists_p, 0); 
+   rb_define_singleton_method(rb_cJIT, "compiled?", vm_jit_compiled_p, 1); 
+   rb_define_singleton_method(rb_cJIT, "compile",   vm_jit_compile_method, 1); 
+}
+
+#ifdef JIT_INTERFACE 
+#include "vm_jit.inc"
+#include "vm_jit.c"
 #endif

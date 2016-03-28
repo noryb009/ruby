@@ -103,18 +103,18 @@ VALUE rb_cSymbol;
 #define RESIZE_CAPA_TERM(str,capacity,termlen) do {\
     if (STR_EMBED_P(str)) {\
 	if ((capacity) > RSTRING_EMBED_LEN_MAX) {\
-	    char *const tmp = ALLOC_N(char, (capacity)+termlen);\
+	    char *const tmp = alloc_omr_buffer((capacity)+termlen);\
 	    const long tlen = RSTRING_LEN(str);\
 	    memcpy(tmp, RSTRING_PTR(str), tlen);\
 	    RSTRING(str)->as.heap.ptr = tmp;\
 	    RSTRING(str)->as.heap.len = tlen;\
-            STR_SET_NOEMBED(str);\
+	    STR_SET_NOEMBED(str);\
 	    RSTRING(str)->as.heap.aux.capa = (capacity);\
 	}\
     }\
     else {\
 	assert(!FL_TEST((str), STR_SHARED)); \
-	REALLOC_N(RSTRING(str)->as.heap.ptr, char, (capacity)+termlen);\
+	RSTRING(str)->as.heap.ptr = realloc_omr_buffer(RSTRING(str)->as.heap.ptr, (capacity)+termlen);\
 	RSTRING(str)->as.heap.aux.capa = (capacity);\
     }\
 } while (0)
@@ -196,7 +196,7 @@ static int fstring_cmp(VALUE a, VALUE b);
 /* in case we restart MVM development, this needs to be per-VM */
 static st_table* frozen_strings;
 
-static inline st_table*
+inline st_table*
 rb_vm_fstring_table(void)
 {
     return frozen_strings;
@@ -578,7 +578,7 @@ str_new0(VALUE klass, const char *ptr, long len, int termlen)
     str = str_alloc(klass);
     if (len > RSTRING_EMBED_LEN_MAX) {
 	RSTRING(str)->as.heap.aux.capa = len;
-	RSTRING(str)->as.heap.ptr = ALLOC_N(char, len + termlen);
+	RSTRING(str)->as.heap.ptr = alloc_omr_buffer(len + termlen);
 	STR_SET_NOEMBED(str);
     }
     else if (len == 0) {
@@ -1004,7 +1004,7 @@ rb_str_buf_new(long capa)
     }
     FL_SET(str, STR_NOEMBED);
     RSTRING(str)->as.heap.aux.capa = capa;
-    RSTRING(str)->as.heap.ptr = ALLOC_N(char, capa+1);
+    RSTRING(str)->as.heap.ptr = alloc_omr_buffer(capa+1);
     RSTRING(str)->as.heap.ptr[0] = '\0';
 
     return str;
@@ -1050,10 +1050,6 @@ rb_str_free(VALUE str)
     if (FL_TEST(str, RSTRING_FSTR)) {
 	st_data_t fstr = (st_data_t)str;
 	st_delete(rb_vm_fstring_table(), &fstr, NULL);
-    }
-
-    if (!STR_EMBED_P(str) && !FL_TEST(str, STR_SHARED|STR_NOFREE)) {
-	ruby_sized_xfree(STR_HEAP_PTR(str), STR_HEAP_SIZE(str));
     }
 }
 
@@ -1600,7 +1596,7 @@ str_make_independent_expand(VALUE str, long expand)
 	return;
     }
 
-    ptr = ALLOC_N(char, capa + termlen);
+    ptr = alloc_omr_buffer(capa + termlen);
     if (RSTRING_PTR(str)) {
 	memcpy(ptr, RSTRING_PTR(str), len);
     }
@@ -1636,7 +1632,7 @@ rb_str_modify_expand(VALUE str, long expand)
 	long capa = len + expand;
 	int termlen = TERM_LEN(str);
 	if (!STR_EMBED_P(str)) {
-	    REALLOC_N(RSTRING(str)->as.heap.ptr, char, capa + termlen);
+	    RSTRING(str)->as.heap.ptr = realloc_omr_buffer(RSTRING(str)->as.heap.ptr, capa + termlen);
 	    RSTRING(str)->as.heap.aux.capa = capa;
 	}
 	else if (capa + termlen > RSTRING_EMBED_LEN_MAX + 1) {
@@ -1662,7 +1658,6 @@ str_discard(VALUE str)
 {
     str_modifiable(str);
     if (!STR_EMBED_P(str) && !FL_TEST(str, STR_SHARED|STR_NOFREE)) {
-	ruby_sized_xfree(STR_HEAP_PTR(str), STR_HEAP_SIZE(str));
 	RSTRING(str)->as.heap.ptr = 0;
 	RSTRING(str)->as.heap.len = 0;
     }
@@ -2147,7 +2142,6 @@ rb_str_resize(VALUE str, long len)
 	    if (slen > 0) MEMCPY(RSTRING(str)->as.ary, ptr, char, slen);
 	    TERM_FILL(RSTRING(str)->as.ary + len, termlen);
 	    STR_SET_EMBED_LEN(str, len);
-	    if (independent) ruby_xfree(ptr);
 	    return str;
 	}
 	else if (!independent) {
@@ -2156,7 +2150,7 @@ rb_str_resize(VALUE str, long len)
 	}
 	else if ((capa = RSTRING(str)->as.heap.aux.capa) < len ||
 		 (capa - len) > (len < 1024 ? len : 1024)) {
-	    REALLOC_N(RSTRING(str)->as.heap.ptr, char, len + termlen);
+	    RSTRING(str)->as.heap.ptr = realloc_omr_buffer(RSTRING(str)->as.heap.ptr, len + termlen);
 	    RSTRING(str)->as.heap.aux.capa = len;
 	}
 	else if (len == slen) return str;
@@ -3720,12 +3714,10 @@ rb_str_drop_bytes(VALUE str, long len)
     nlen = olen - len;
     if (nlen <= RSTRING_EMBED_LEN_MAX) {
 	char *oldptr = ptr;
-	int fl = (int)(RBASIC(str)->flags & (STR_NOEMBED|STR_SHARED|STR_NOFREE));
 	STR_SET_EMBED(str);
 	STR_SET_EMBED_LEN(str, nlen);
 	ptr = RSTRING(str)->as.ary;
 	memmove(ptr, oldptr + len, nlen);
-	if (fl == STR_NOEMBED) xfree(oldptr);
     }
     else {
 	if (!STR_SHARED_P(str)) rb_str_new_frozen(str);
@@ -5658,7 +5650,9 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	int clen, tlen;
 	long offset, max = RSTRING_LEN(str);
 	unsigned int save = -1;
-	char *buf = ALLOC_N(char, max), *t = buf;
+	char *buf, *t;
+	buf = alloc_omr_buffer(max);
+	t = buf;
 
 	while (s < send) {
 	    int may_modify = 0;
@@ -5699,7 +5693,7 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	    while (t - buf + tlen >= max) {
 		offset = t - buf;
 		max *= 2;
-		REALLOC_N(buf, char, max);
+		buf = realloc_omr_buffer(buf, max);
 		t = buf + offset;
 	    }
 	    rb_enc_mbcput(c, t, enc);
@@ -5708,9 +5702,6 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	    }
 	    CHECK_IF_ASCII(c);
 	    t += tlen;
-	}
-	if (!STR_EMBED_P(str)) {
-	    ruby_sized_xfree(STR_HEAP_PTR(str), STR_HEAP_SIZE(str));
 	}
 	TERM_FILL(t, rb_enc_mbminlen(enc));
 	RSTRING(str)->as.heap.ptr = buf;
@@ -5739,7 +5730,9 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
     else {
 	int clen, tlen, max = (int)(RSTRING_LEN(str) * 1.2);
 	long offset;
-	char *buf = ALLOC_N(char, max), *t = buf;
+	char *buf, *t;
+	buf = alloc_omr_buffer(max);
+	t = buf;
 
 	while (s < send) {
 	    int may_modify = 0;
@@ -5772,7 +5765,7 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	    while (t - buf + tlen >= max) {
 		offset = t - buf;
 		max *= 2;
-		REALLOC_N(buf, char, max);
+		buf = realloc_omr_buffer(buf, max);
 		t = buf + offset;
 	    }
 	    if (s != t) {
@@ -5785,11 +5778,9 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	    s += clen;
 	    t += tlen;
 	}
-	if (!STR_EMBED_P(str)) {
-	    ruby_sized_xfree(STR_HEAP_PTR(str), STR_HEAP_SIZE(str));
-	}
 	TERM_FILL(t, rb_enc_mbminlen(enc));
 	RSTRING(str)->as.heap.ptr = buf;
+
 	RSTRING(str)->as.heap.len = t - buf;
 	STR_SET_NOEMBED(str);
 	RSTRING(str)->as.heap.aux.capa = max;

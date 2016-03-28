@@ -1874,6 +1874,7 @@ hdrdir = #{(hdrdir = CONFIG["hdrdir"]) == topdir ? "$(topdir)" : mkintpath(hdrdi
 arch_hdrdir = #{$arch_hdrdir.quote}
 PATH_SEPARATOR = #{CONFIG['PATH_SEPARATOR']}
 VPATH = #{vpath.join(CONFIG['PATH_SEPARATOR'])}
+#{"include $(OMRDIR)/omrmakefiles/omr_defs.mk" if $extmk}
 }
     if $extmk
       mk << "RUBYLIB =\n""RUBYOPT = -\n"
@@ -1936,7 +1937,7 @@ CCDLFLAGS = #{$static ? '' : CONFIG['CCDLFLAGS']}
 CFLAGS   = $(CCDLFLAGS) #$CFLAGS $(ARCH_FLAG)
 INCFLAGS = -I. #$INCFLAGS
 DEFS     = #{CONFIG['DEFS']}
-CPPFLAGS = #{extconf_h}#{$CPPFLAGS}
+CPPFLAGS = #{extconf_h}#{$CPPFLAGS} $(OMRCPPFLAGS)
 CXXFLAGS = $(CCDLFLAGS) #$CXXFLAGS $(ARCH_FLAG)
 ldflags  = #{$LDFLAGS}
 dldflags = #{$DLDFLAGS} #{CONFIG['EXTDLDFLAGS']}
@@ -2452,6 +2453,7 @@ site-install-rb: install-rb
     $INCFLAGS = "-I$(arch_hdrdir)"
     $INCFLAGS << " -I$(hdrdir)/ruby/backward" unless $extmk
     $INCFLAGS << " -I$(hdrdir) -I$(srcdir)"
+    $INCFLAGS << " $(OMRINCLUDECORE) -I$(OMRGLUEDIR)" unless not $extmk
     $DLDFLAGS = with_config("dldflags", arg_config("DLDFLAGS", config["DLDFLAGS"])).dup
     $LIBEXT = config['LIBEXT'].dup
     $OBJEXT = config["OBJEXT"].dup

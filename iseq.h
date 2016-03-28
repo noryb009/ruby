@@ -12,6 +12,10 @@
 #ifndef RUBY_COMPILE_H
 #define RUBY_COMPILE_H
 
+#if defined(__cplusplus) && defined(OMR)
+extern "C" {
+#endif /* defined(__cplusplus) && defined(OMR) */
+
 RUBY_SYMBOL_EXPORT_BEGIN
 
 /* compile.c */
@@ -154,5 +158,9 @@ VALUE rb_iseq_defined_string(enum defined_type type);
 #define DEFAULT_SPECIAL_VAR_COUNT 2
 
 RUBY_SYMBOL_EXPORT_END
+
+#if defined(__cplusplus) && defined(OMR)
+} /* extern "C" */
+#endif /* defined(__cplusplus) && defined(OMR) */
 
 #endif /* RUBY_COMPILE_H */

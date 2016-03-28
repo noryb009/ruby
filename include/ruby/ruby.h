@@ -35,6 +35,9 @@ extern "C" {
 
 #include "defines.h"
 
+struct rb_omr_markstate;
+typedef struct rb_omr_markstate * rb_omr_markstate_t;
+
 #define NORETURN_STYLE_NEW 1
 #ifndef NORETURN
 # define NORETURN(x) x
@@ -431,37 +434,44 @@ enum ruby_special_consts {
 
 #define CLASS_OF(v) rb_class_of((VALUE)(v))
 
+#if defined(OMR)
+#define RUBY_TYPE_SHIFT 1
+#else /* defined(OMR) */
+#define RUBY_TYPE_SHIFT 0
+#endif /* else defined(OMR) */
+
 enum ruby_value_type {
-    RUBY_T_NONE   = 0x00,
+    RUBY_T_NONE   = 0x00 << RUBY_TYPE_SHIFT, /* 0x00 */
 
-    RUBY_T_OBJECT = 0x01,
-    RUBY_T_CLASS  = 0x02,
-    RUBY_T_MODULE = 0x03,
-    RUBY_T_FLOAT  = 0x04,
-    RUBY_T_STRING = 0x05,
-    RUBY_T_REGEXP = 0x06,
-    RUBY_T_ARRAY  = 0x07,
-    RUBY_T_HASH   = 0x08,
-    RUBY_T_STRUCT = 0x09,
-    RUBY_T_BIGNUM = 0x0a,
-    RUBY_T_FILE   = 0x0b,
-    RUBY_T_DATA   = 0x0c,
-    RUBY_T_MATCH  = 0x0d,
-    RUBY_T_COMPLEX  = 0x0e,
-    RUBY_T_RATIONAL = 0x0f,
+    RUBY_T_OBJECT = 0x01 << RUBY_TYPE_SHIFT, /* 0x02 */
+    RUBY_T_CLASS  = 0x02 << RUBY_TYPE_SHIFT, /* 0x04 */
+    RUBY_T_MODULE = 0x03 << RUBY_TYPE_SHIFT, /* 0x06 */
+    RUBY_T_FLOAT  = 0x04 << RUBY_TYPE_SHIFT, /* 0x08 */
+    RUBY_T_STRING = 0x05 << RUBY_TYPE_SHIFT, /* 0x0a */
+    RUBY_T_REGEXP = 0x06 << RUBY_TYPE_SHIFT, /* 0x0c */
+    RUBY_T_ARRAY  = 0x07 << RUBY_TYPE_SHIFT, /* 0x0e */
+    RUBY_T_HASH   = 0x08 << RUBY_TYPE_SHIFT, /* 0x10 */
+    RUBY_T_STRUCT = 0x09 << RUBY_TYPE_SHIFT, /* 0x12 */
+    RUBY_T_BIGNUM = 0x0a << RUBY_TYPE_SHIFT, /* 0x14 */
+    RUBY_T_FILE   = 0x0b << RUBY_TYPE_SHIFT, /* 0x16 */
+    RUBY_T_DATA   = 0x0c << RUBY_TYPE_SHIFT, /* 0x18 */
+    RUBY_T_MATCH  = 0x0d << RUBY_TYPE_SHIFT, /* 0x1a */
+    RUBY_T_COMPLEX  = 0x0e << RUBY_TYPE_SHIFT, /* 0x1c */
+    RUBY_T_RATIONAL = 0x0f << RUBY_TYPE_SHIFT, /* 0x1e */
 
-    RUBY_T_NIL    = 0x11,
-    RUBY_T_TRUE   = 0x12,
-    RUBY_T_FALSE  = 0x13,
-    RUBY_T_SYMBOL = 0x14,
-    RUBY_T_FIXNUM = 0x15,
+    RUBY_T_NIL    = 0x11 << RUBY_TYPE_SHIFT, /* 0x22 */
+    RUBY_T_TRUE   = 0x12 << RUBY_TYPE_SHIFT, /* 0x24 */
+    RUBY_T_FALSE  = 0x13 << RUBY_TYPE_SHIFT, /* 0x26 */
+    RUBY_T_SYMBOL = 0x14 << RUBY_TYPE_SHIFT, /* 0x28 */
+    RUBY_T_FIXNUM = 0x15 << RUBY_TYPE_SHIFT, /* 0x2a */
+    RUBY_T_OMRBUF = 0x16 << RUBY_TYPE_SHIFT, /* 0x2c */
 
-    RUBY_T_UNDEF  = 0x1b,
-    RUBY_T_NODE   = 0x1c,
-    RUBY_T_ICLASS = 0x1d,
-    RUBY_T_ZOMBIE = 0x1e,
+    RUBY_T_UNDEF  = 0x1b << RUBY_TYPE_SHIFT, /* 0x36 */
+    RUBY_T_NODE   = 0x1c << RUBY_TYPE_SHIFT, /* 0x38 */
+    RUBY_T_ICLASS = 0x1d << RUBY_TYPE_SHIFT, /* 0x3a */
+    RUBY_T_ZOMBIE = 0x1e << RUBY_TYPE_SHIFT, /* 0x3c */
 
-    RUBY_T_MASK   = 0x1f
+    RUBY_T_MASK   = 0x1f << RUBY_TYPE_SHIFT /* 0x3e */
 };
 
 #define T_NONE   RUBY_T_NONE
@@ -489,9 +499,39 @@ enum ruby_value_type {
 #define T_UNDEF  RUBY_T_UNDEF
 #define T_NODE   RUBY_T_NODE
 #define T_ZOMBIE RUBY_T_ZOMBIE
+#define T_OMRBUF RUBY_T_OMRBUF
 #define T_MASK   RUBY_T_MASK
 
 #define BUILTIN_TYPE(x) (int)(((struct RBasic*)(x))->flags & T_MASK)
+
+static inline int
+ruby_type_p(int type)
+{
+    return (type != T_MASK) && ((type & ~T_MASK) == 0);
+}
+
+
+static inline size_t
+ruby_type_to_index(int type)
+{
+    return type >> RUBY_TYPE_SHIFT;
+}
+
+static inline int
+ruby_index_to_type(size_t index)
+{
+    return index << RUBY_TYPE_SHIFT;
+}
+
+#define RUBY_TYPE_COUNT (T_MASK >> RUBY_TYPE_SHIFT)
+
+#if defined(OMR)
+#define RUBY_HEAP_HOLE_MASK (1 << RUBY_TYPE_SHIFT)-1    /* Alias of J9_GC_OBJ_HEAP_HOLE */
+#define RUBY_USABLE_FLAGS_MASK ~(T_MASK | RUBY_HEAP_HOLE_MASK)
+#else /* defined(OMR) */
+#define RUBY_USABLE_FLAGS_MASK ~(T_MASK)
+#endif /* else defined(OMR) */
+
 
 static inline int rb_type(VALUE obj);
 #define TYPE(x) rb_type((VALUE)(x))
@@ -778,12 +818,42 @@ VALUE rb_obj_setup(VALUE obj, VALUE klass, VALUE type);
 
 struct RBasic {
     VALUE flags;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).
+     * Removing for now.
+     */
+    VALUE klass;
+#else /* OMR */
     const VALUE klass;
+#endif /* OMR */
 }
 #ifdef __GNUC__
     __attribute__((aligned(sizeof(VALUE))))
 #endif
 ;
+
+struct RBasicOMR {
+    VALUE flags;
+};
+
+typedef struct OMRBuffer {
+    struct RBasicOMR basic;
+    long size;
+} OMRBuffer;
+
+#define BUF_SIZEOF(buf) (((OMRBuffer *)(buf))->size)
+#define OMRBUF_DATA_PTR_FROM_HEAP_PTR(buf) ((void *) (((OMRBuffer *)buf) + 1))
+#define OMRBUF_HEAP_PTR_FROM_DATA_PTR(buf) (((OMRBuffer *)buf) - 1)
+#define OMRBUF_VALUE_FROM_DATA_PTR(buf) ((VALUE)OMRBUF_HEAP_PTR_FROM_DATA_PTR(buf))
+#define OMRBUF_DATA_PTR(buf) OMRBUF_DATA_PTR_FROM_HEAP_PTR(ROMRBUF(buf))
+#define RSTRING_GET_OMRSTRINGBUF_HEAP_PTR(str) OMRBUF_HEAP_PTR_FROM_DATA_PTR(RSTRING_PTR(str))
+
+void *alloc_omr_buffer(long bufSize);
+void *calloc_omr_buffer(long numElem, long elemSize);
+void *realloc_omr_buffer_without_gvl(void *oldBuf, long newBufSize);
+void *realloc_omr_buffer(void *oldBuf, long newBufSize);
+void *zalloc_omr_buffer(long bufSize);
 
 VALUE rb_obj_hide(VALUE obj);
 VALUE rb_obj_reveal(VALUE obj, VALUE klass); /* do not use this API to change klass information */
@@ -893,9 +963,25 @@ struct RArray {
 		long capa;
 		VALUE shared;
 	    } aux;
+#if defined(OMR)
+	    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+	     * under C++ (const used in a structure used in a union - copy constructor required).
+	     * Removing for now.
+	     */
+	    VALUE *ptr;
+#else /* OMR */
 	    const VALUE *ptr;
+#endif /* OMR */
 	} heap;
+#if defined(OMR)
+	/* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+	 * under C++ (const used in a structure used in a union - copy constructor required).
+	 * Removing for now.
+	 */
+	VALUE ary[RARRAY_EMBED_LEN_MAX];
+#else /* OMR */
 	const VALUE ary[RARRAY_EMBED_LEN_MAX];
+#endif /* OMR */
     } as;
 };
 #define RARRAY_EMBED_FLAG FL_USER1
@@ -938,7 +1024,15 @@ struct RArray {
 struct RRegexp {
     struct RBasic basic;
     struct re_pattern_buffer *ptr;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).
+     * Removing for now.
+     */
+    VALUE src;
+#else /* OMR */
     const VALUE src;
+#endif /* OMR */
     unsigned long usecnt;
 };
 #define RREGEXP_SRC(r) RREGEXP(r)->src
@@ -989,6 +1083,15 @@ struct rb_data_type_struct {
 #define HAVE_TYPE_RB_DATA_TYPE_T 1
 #define HAVE_RB_DATA_TYPE_T_FUNCTION 1
 #define HAVE_RB_DATA_TYPE_T_PARENT 1
+/**
+ * TODO: these bits aren't actually necessary, they just indicate which finalize list (or not list) these object should be
+ * added to on allocation.  We could maybe remove these bits and have the user explicitly indicate which finalize list to
+ * add the RDATAs to,  but these bits provide a really convenient/backwards-compatible way for a programmer to indicate this..
+ *
+ * We currently not really starved for RDATA flag bits so leaving it like this for now..
+ */
+#define RDATA_HEAP_ALLOC_STRUCT FL_USER1
+#define RDATA_PARALLEL_FREE FL_USER2
 
 struct RTypedData {
     struct RBasic basic;
@@ -1042,10 +1145,10 @@ void *rb_check_typeddata(VALUE, const rb_data_type_t *);
 #define TypedData_Wrap_Struct(klass,data_type,sval)\
   rb_data_typed_object_alloc((klass),(sval),(data_type))
 
+
 #define TypedData_Make_Struct(klass, type, data_type, sval) (\
-    (sval) = ZALLOC(type),\
-    TypedData_Wrap_Struct((klass),(data_type),(sval))\
-)
+    (sval) =  (data_type)->flags & RDATA_HEAP_ALLOC_STRUCT ? zalloc_omr_buffer(sizeof(type)) : ZALLOC(type),\
+    TypedData_Wrap_Struct((klass),(data_type),(sval)))
 
 #define Data_Get_Struct(obj,type,sval) \
     ((sval) = (type*)rb_data_object_get(obj))
@@ -1059,9 +1162,25 @@ struct RStruct {
     union {
 	struct {
 	    long len;
+#if defined(OMR)
+	    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+	    * under C++ (const used in a structure used in a union - copy constructor required).
+	    * Removing for now.
+	    */
+	    VALUE *ptr;
+#else /* OMR */
 	    const VALUE *ptr;
+#endif /* OMR */
 	} heap;
+#if defined(OMR)
+	/* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+	 * under C++ (const used in a structure used in a union - copy constructor required).
+	 * Removing for now.
+	 */
+	VALUE ary[RSTRUCT_EMBED_LEN_MAX];
+#else /* OMR */
 	const VALUE ary[RSTRUCT_EMBED_LEN_MAX];
+#endif /* OMR  */
     } as;
 };
 #define RSTRUCT_EMBED_LEN_MASK (FL_USER2|FL_USER1)
@@ -1097,13 +1216,14 @@ struct RStruct {
 #define RTYPEDDATA(obj)   (R_CAST(RTypedData)(obj))
 #define RSTRUCT(obj) (R_CAST(RStruct)(obj))
 #define RFILE(obj)   (R_CAST(RFile)(obj))
+#define ROMRBUF(obj) (R_CAST(OMRBuffer)(obj))
 
 #define FL_SINGLETON FL_USER0
-#define FL_WB_PROTECTED (((VALUE)1)<<5)
-#define FL_PROMOTED0 (((VALUE)1)<<5)
-#define FL_PROMOTED1 (((VALUE)1)<<6)
-#define FL_FINALIZE  (((VALUE)1)<<7)
-#define FL_TAINT     (((VALUE)1)<<8)
+#define FL_WB_PROTECTED (((VALUE)1)<<6)
+#define FL_PROMOTED0 (((VALUE)1)<<6)
+#define FL_PROMOTED1 (((VALUE)1)<<7)
+#define FL_FINALIZE  (((VALUE)1)<<8)
+#define FL_TAINT     (((VALUE)1)<<9)
 #define FL_UNTRUSTED FL_TAINT
 #define FL_EXIVAR    (((VALUE)1)<<10)
 #define FL_FREEZE    (((VALUE)1)<<11)
@@ -1853,6 +1973,9 @@ int ruby_run_node(void *n);
 /* version.c */
 void ruby_show_version(void);
 void ruby_show_copyright(void);
+#if defined(OMR)
+void ruby_show_omr_version(void);
+#endif /* OMR */
 
 
 /*! A convenience macro to call ruby_init_stack(). Must be placed just after

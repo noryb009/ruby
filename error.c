@@ -518,8 +518,8 @@ const char *
 rb_builtin_type_name(int t)
 {
     const char *name;
-    if ((unsigned int)t >= numberof(builtin_types)) return 0;
-    name = builtin_types[t];
+    if (!ruby_type_p(t)) return 0;
+    name = builtin_types[ruby_type_to_index(t)];
     if (*name) return name;
     return 0;
 }

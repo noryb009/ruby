@@ -16,6 +16,10 @@
 #include "eval_intern.h"
 #include "iseq.h"
 
+#if defined(OMR)
+#include "rbgcsupport.h"
+#endif /* defined(OMR) */
+
 static VALUE rb_cBacktrace;
 static VALUE rb_cBacktraceLocation;
 
@@ -82,12 +86,12 @@ location_mark(void *ptr)
 }
 
 static void
-location_mark_entry(rb_backtrace_location_t *fi)
+location_mark_entry(rb_omr_markstate_t ms, rb_backtrace_location_t *fi)
 {
     switch (fi->type) {
       case LOCATION_TYPE_ISEQ:
       case LOCATION_TYPE_ISEQ_CALCED:
-	rb_gc_mark(fi->body.iseq.iseq->self);
+	rb_omr_mark(ms, fi->body.iseq.iseq->self);
 	break;
       case LOCATION_TYPE_CFUNC:
       case LOCATION_TYPE_IFUNC:
@@ -380,7 +384,7 @@ backtrace_mark(void *ptr)
     size_t i, s = bt->backtrace_size;
 
     for (i=0; i<s; i++) {
-	location_mark_entry(&bt->backtrace[i]);
+	location_mark_entry(rb_omr_get_markstate(), &bt->backtrace[i]);
     }
     rb_gc_mark(bt->strary);
     rb_gc_mark(bt->locary);

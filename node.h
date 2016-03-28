@@ -366,7 +366,10 @@ typedef struct RNode {
 #define NEW_DEFN(i,a,d,p) NEW_NODE(NODE_DEFN,0,i,NEW_SCOPE(a,d))
 #define NEW_DEFS(r,i,a,d) NEW_NODE(NODE_DEFS,r,i,NEW_SCOPE(a,d))
 #define NEW_IFUNC(f,c) NEW_NODE(NODE_IFUNC,f,c,0)
+#if 0
+/* Moved to  parse.y, look there for explanation */
 #define NEW_SCOPE(a,b) NEW_NODE(NODE_SCOPE,local_tbl(),b,a)
+#endif
 #define NEW_BLOCK(a) NEW_NODE(NODE_BLOCK,a,0,0)
 #define NEW_IF(c,t,e) NEW_NODE(NODE_IF,c,t,e)
 #define NEW_UNLESS(c,t,e) NEW_IF(c,e,t)
@@ -495,7 +498,7 @@ NODE *rb_node_newnode(enum node_type,VALUE,VALUE,VALUE);
 NODE *rb_node_newnode_longlife(enum node_type,VALUE,VALUE,VALUE);
 void rb_gc_free_node(VALUE obj);
 size_t rb_node_memsize(VALUE obj);
-VALUE rb_gc_mark_node(NODE *obj);
+VALUE rb_gc_mark_node(rb_omr_markstate_t ms, NODE *obj);
 
 struct rb_global_entry {
     struct rb_global_variable *var;

@@ -2939,7 +2939,7 @@ rb_big_realloc(VALUE big, size_t len)
     BDIGIT *ds;
     if (RBASIC(big)->flags & BIGNUM_EMBED_FLAG) {
 	if (BIGNUM_EMBED_LEN_MAX < len) {
-	    ds = ALLOC_N(BDIGIT, len);
+	    ds = alloc_omr_buffer(sizeof(BDIGIT) * len);
 	    MEMCPY(ds, RBIGNUM(big)->as.ary, BDIGIT, BIGNUM_EMBED_LEN_MAX);
 	    RBIGNUM(big)->as.heap.len = BIGNUM_LEN(big);
 	    RBIGNUM(big)->as.heap.digits = ds;
@@ -2954,15 +2954,17 @@ rb_big_realloc(VALUE big, size_t len)
             (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)RBIGNUM(big)->as.ary, sizeof(RBIGNUM(big)->as.ary));
 	    if (ds) {
 		MEMCPY(RBIGNUM(big)->as.ary, ds, BDIGIT, len);
-		xfree(ds);
+#if !defined(OMR)
+		xfree(ds); /* Cannot free heap allocated memory explicitly, just let it be garbage collected. */
+#endif /* !OMR */
 	    }
 	}
 	else {
 	    if (BIGNUM_LEN(big) == 0) {
-		RBIGNUM(big)->as.heap.digits = ALLOC_N(BDIGIT, len);
+		RBIGNUM(big)->as.heap.digits = alloc_omr_buffer(len * sizeof(BDIGIT));
 	    }
 	    else {
-		REALLOC_N(RBIGNUM(big)->as.heap.digits, BDIGIT, len);
+		RBIGNUM(big)->as.heap.digits = realloc_omr_buffer(RBIGNUM(big)->as.heap.digits, len * sizeof(BDIGIT));
 	    }
 	}
     }
@@ -2986,7 +2988,7 @@ bignew_1(VALUE klass, size_t len, int sign)
         (void)VALGRIND_MAKE_MEM_UNDEFINED((void*)RBIGNUM(big)->as.ary, sizeof(RBIGNUM(big)->as.ary));
     }
     else {
-	RBIGNUM(big)->as.heap.digits = ALLOC_N(BDIGIT, len);
+	RBIGNUM(big)->as.heap.digits = alloc_omr_buffer(sizeof(BDIGIT) * len);
 	RBIGNUM(big)->as.heap.len = len;
     }
     OBJ_FREEZE(big);

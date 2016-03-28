@@ -12,6 +12,7 @@ PATH_SEPARATOR = @PATH_SEPARATOR@
 #### Start of system configuration section. ####
 
 srcdir = @srcdir@
+abs_srcdir= @abs_srcdir@
 top_srcdir = $(srcdir)
 hdrdir = $(srcdir)/include
 PLATFORM_DIR = @PLATFORM_DIR@
@@ -60,18 +61,23 @@ COUTFLAG = @COUTFLAG@$(empty)
 ARCH_FLAG = @ARCH_FLAG@
 CFLAGS_NO_ARCH = @CFLAGS@
 CFLAGS = $(CFLAGS_NO_ARCH) $(ARCH_FLAG)
+CXXFLAGS_NO_ARCH = @CXXFLAGS@
+CXXFLAGS = $(CXXFLAGS_NO_ARCH) $(ARCH_FLAG)
 cflags = @cflags@
+# This line should contain the AC_SUBST cxxflags, but that includes warnflags.
+# warnflags contains the C std flag used, and is not valid for C++.
+cxxflags = ${optflags} ${debugflags} 
 optflags = @optflags@
 debugflags = @debugflags@
 warnflags = @warnflags@ @strict_warnflags@
 cppflags = @cppflags@
-INCFLAGS = -I. -I$(arch_hdrdir) -I$(hdrdir) -I$(srcdir)
+incdirs = . $(arch_hdrdir) $(hdrdir) $(srcdir)
+INCFLAGS = $(patsubst %,-I%,$(incdirs) $(OMR_IPATH) $(OMRGLUE_IPATH))
 XCFLAGS = @XCFLAGS@
-CPPFLAGS = @CPPFLAGS@ $(INCFLAGS)
+CPPFLAGS = @CPPFLAGS@ $(INCFLAGS) $(OMRCPPFLAGS)
 LDFLAGS = @STATIC@ $(CFLAGS) @LDFLAGS@
 EXTLDFLAGS = @EXTLDFLAGS@
 XLDFLAGS = @XLDFLAGS@ $(EXTLDFLAGS)
-EXTLIBS =
 LIBS = @LIBS@ $(EXTLIBS)
 MISSING = @LIBOBJS@ @ALLOCA@
 LDSHARED = @LIBRUBY_LDSHARED@
@@ -203,24 +209,160 @@ ECHO_END = ; do echo @ECHO_N@ "$$sep'$$word'@ECHO_C@"; sep=' '; done; echo
 DESTDIR       = @DESTDIR@
 
 configure_args = @configure_args@
-#### End of variables
+
+#### OMR Variables ####
+
+WITH_OMR = @WITH_OMR@
+WITH_OMR_HEALTHCENTER = @WITH_OMR_HEALTHCENTER@
+OMR_CONFIGURE_ARGS := @OMR_CONFIGURE_ARGS@
+XOMR_CONFIGURE_ARGS := @XOMR_CONFIGURE_ARGS@
+all_omr_configure_args := $(XOMR_CONFIGURE_ARGS) $(OMR_CONFIGURE_ARGS)
+
+ifdef WITH_OMR
+
+LIBS+=-ldl
+export SPEC = @SPEC@
+
+# The Environment / Configure variable OMRGLUE defines the absolute path of the Ruby OMR glue directory
+export OMRGLUEDIR = @OMRGLUE@
+export OMRDIR = @OMRDIR@
+
+RUBY_IPATH = \
+  $(abs_srcdir) \
+  $(abs_srcdir)/$(arch_hdrdir) \
+  $(abs_srcdir)/$(srcdir) \
+  $(abs_srcdir)/$(hdrdir)
+
+OMRGLUE_IPATH=$(OMRGLUEDIR)
+
+override MFLAGS += "OMRDIR=$(OMRDIR)"
+
+# Add OMR Flags
+include $(OMRDIR)/omrmakefiles/omr_defs.mk
+
+OMRLIB=$(OMRDIR)/lib/libomrstatic.a
+
+ifdef WITH_OMR_HEALTHCENTER
+OMR_HEALTHCENTER_PATH ?= @OMR_HEALTHCENTER_PATH@
+endif # WITH_OMR_HEALTHCENTER
+
+endif # ifdef WITH_OMR
+
+# OMR JIT Configuration
+
+WITH_OMR_JIT=   @WITH_OMR_JIT@
+
+ifdef WITH_OMR_JIT
+
+TRSRC?=@TRSRC@
+export TRSRC
+JIT_SO_NAME="librbjit.so"
+JIT_SO_DIR="$(CURDIR)"
+
+endif # WITH_OMR_JIT
+
+#### End of variables ####
 
 .SUFFIXES: .inc .h .c .y .i .$(DTRACE_EXT)
 
+# Default build targets
+
 all:
+	$(MAKE) prebuild
+	$(MAKE) ruby_all
+	$(MAKE) postbuild
+	@echo "all pass"
+
+prebuild:
+	@echo "prebuild pass"
+
+postbuild:
+	@echo "postbuild pass"
+
+.PHONY: all prebuild postbuild
+
 
 # Prevent GNU make v3 from overflowing arg limit on SysV.
 .NOEXPORT:
 
+ifdef WITH_OMR
+clean: omr-clean
+prebuild: omr
+
+ifdef WITH_OMR_JIT 
+postbuild: jit
+install: jit-install
+uninstall: jit-uninstall
+clean: jit-clean
+endif
+
+omr-configure:
+	$(MAKE) -C $(OMRDIR) -f run_configure.mk SPEC="$(SPEC)" OMRGLUE="$(OMRGLUEDIR)" OMRGLUE_INCLUDES="$(RUBY_IPATH)" OMRGLUE_CXXFLAGS="-Wno-error" OMRGLUE_CFLAGS="-Wno-error" EXTRA_CONFIGURE_ARGS="$(all_omr_configure_args)"
+
+omr: omr-configure
+	$(MAKE) id.h
+	$(MAKE) -C $(OMRDIR)
+
+omr-clean:
+	-$(MAKE) -C $(OMRDIR) clean
+	-$(MAKE) -C $(OMRDIR) -f run_configure.mk OMRGLUE="$(OMRGLUEDIR)" clean
+
+.PHONY: omr omr-clean omr-configure
+
+# JIT  
+
+# Recursive JIT make option.
+JIT_PARAOPT ?= -j4 
+
+jit: jit-prod
+jit-prod:
+	nice $(MAKE) $(JIT_PARAOPT) -C $(TRSRC)/ruby RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=prod  OMR_RUBY_INSTALL=$(OMRDIR)/../
+jit-debug:
+	nice $(MAKE) $(JIT_PARAOPT) -C $(TRSRC)/ruby RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=debug OMR_RUBY_INSTALL=$(OMRDIR)/../
+
+jit-install: jit
+	$(INSTALL) -D $(JIT_SO_DIR)/$(JIT_SO_NAME) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
+
+jit-uninstall:
+	$(RM) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
+
+jit-clean:
+	$(MAKE) -C $(TRSRC)/ruby JIT_DLL_DIR="$(JIT_SO_DIR)" OMR_RUBY_INSTALL=$(OMRDIR)/../ clean
+
+.PHONY: jit jit-only jit-install jit-clean
+
+ifdef WITH_OMR_HEALTHCENTER
+install: hc-install
+uninstall: hc-uninstall
+
+hc-install:
+	$(INSTALL) -d $(DESTDIR)$(libdir)/healthcenter/plugins
+	$(INSTALL) $(OMR_HEALTHCENTER_PATH)/libhealthcenter.so $(DESTDIR)$(libdir)/healthcenter
+	$(INSTALL) -m0644 $(OMR_HEALTHCENTER_PATH)/healthcenter.properties $(DESTDIR)$(libdir)/healthcenter
+	$(INSTALL) $(OMR_HEALTHCENTER_PATH)/plugins/libhcmqtt.so $(DESTDIR)$(libdir)/healthcenter/plugins
+
+hc-uninstall:
+	$(RM) -r $(DESTDIR)$(libdir)/healthcenter
+
+.PHONY: hc-install hc-uninstall
+endif # WITH_OMR_HEALTHCENTER
+
+endif # ifdef WITH_OMR
+
+# Ruby Targets
+
+# Miniruby links directly against OMR static libraries because it is needed 
+# as part of the compilation process before libruby is created.
+
 miniruby$(EXEEXT):
 		@-if test -f $@; then $(MV) -f $@ $@.old; $(RM) $@.old; fi
 		$(ECHO) linking $@
-		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(INITOBJS) $(MAINLIBS) $(LIBS) $(OUTFLAG)$@
+		$(Q) $(PURIFY) $(CXX) $(LDFLAGS) $(XLDFLAGS) $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(INITOBJS) $(MAINLIBS) $(OMRLIB) $(LIBS) $(OUTFLAG)$@
 
 $(PROGRAM):
 		@$(RM) $@
 		$(ECHO) linking $@
-		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(MAINLIBS) $(LIBS) $(EXTLIBS) $(OUTFLAG)$@
+		$(Q) $(PURIFY) $(CXX) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(MAINLIBS) $(LIBS) $(OUTFLAG)$@
 		$(Q) $(POSTLINK)
 
 # We must `rm' the library each time this rule is invoked because "updating" a
@@ -232,8 +374,14 @@ $(LIBRUBY_A):
 		$(Q) $(AR) $(ARFLAGS) $@ $(LIBRUBY_A_OBJS) $(INITOBJS)
 		@-$(RANLIB) $@ 2> /dev/null || true
 		$(ECHO) verifying static-library $@
-		@$(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)conftest$(EXEEXT)
+		@$(PURIFY) $(CXX) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(LIBRUBY_A) $(MAINLIBS) $(OMRLIB) $(LIBS) $(OUTFLAG)conftest$(EXEEXT)
 		@$(RM) conftest$(EXEEXT) conftest.c
+# Extract the OMR static library and put all of the object files in the static Ruby library.
+		$(ECHO) Packaging OMR static library into $@
+		rm -fr omrlib && mkdir omrlib && cd omrlib; \
+		ar x $(OMRLIB)
+		find omrlib -name '*.o' -exec ar q $@ '{}' '+'
+		rm -rf omrlib
 
 $(LIBRUBY_SO):
 		@-$(PRE_LIBRUBY_UPDATE)
@@ -491,6 +639,15 @@ update-coverage:
 
 INSNS	= opt_sc.inc optinsn.inc optunifs.inc insns.inc insns_info.inc \
 	  vmtc.inc vm.inc
+
+ifdef WITH_OMR_JIT
+INSNS   += vm_jit.inc vm_jit_callbacks.inc vm_jit_initializations.inc vm_jit_forward.inc
+
+inc-clean: 
+	- rm $(INSNS)
+
+vm.$(OBJEXT): $(INSNS)
+endif
 
 $(INSNS): $(srcdir)/insns.def vm_opts.h \
 	  $(srcdir)/defs/opt_operand.def $(srcdir)/defs/opt_insn_unif.def \

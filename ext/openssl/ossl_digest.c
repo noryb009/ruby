@@ -40,7 +40,11 @@ static const rb_data_type_t ossl_digest_type = {
     {
 	0, ossl_digest_free,
     },
+#if defined(OMR)
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_PARALLEL_FREE,
+#else /* OMR */
     0, 0, RUBY_TYPED_FREE_IMMEDIATELY,
+#endif /* OMR */
 };
 
 /*

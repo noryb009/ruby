@@ -928,6 +928,17 @@ check_reserved_signal_(const char *name, size_t name_len)
 }
 #endif
 
+#ifdef SIGABRT
+static RETSIGTYPE
+sigabrt(int sig SIGINFO_ARG)
+{
+    /* Immediately reinstall the default signal handler.
+     * This way, rb_bug or any other error will successfully core dump. */
+    ruby_signal(sig, SIG_DFL);
+    rb_bug("Abort" MESSAGE_FAULT_ADDRESS); /* Will recursively abort. */
+}
+#endif /* SIGABRT */
+
 static void
 signal_exec(VALUE cmd, int safe, int sig)
 {
@@ -1048,6 +1059,11 @@ default_handler(int sig)
 #ifdef SIGSEGV
       case SIGSEGV:
         func = (sighandler_t)sigsegv;
+        break;
+#endif
+#if defined(OMR) && defined(SIGABRT)
+      case SIGABRT:
+        func = (sighandler_t)sigabrt;
         break;
 #endif
 #ifdef SIGPIPE
@@ -1211,6 +1227,10 @@ reserved_signal_p(int signo)
 #ifdef SIGSEGV
     if (signo == SIGSEGV)
 	return 1;
+#endif
+#ifdef SIGABRT
+    if (signo == SIGABRT)
+        return 1;
 #endif
 #ifdef SIGBUS
     if (signo == SIGBUS)
@@ -1463,6 +1483,9 @@ Init_signal(void)
 	rb_register_sigaltstack(GET_THREAD());
 # endif
 	install_sighandler(SIGSEGV, (sighandler_t)sigsegv);
+#endif
+#ifdef SIGABRT
+        install_sighandler(SIGABRT, (sighandler_t)sigabrt);
 #endif
     }
 #ifdef SIGPIPE

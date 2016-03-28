@@ -22,6 +22,10 @@ extern "C" {
 #include RUBY_EXTCONF_H
 #endif
 
+#if 0
+#define RWY_DEBUG
+#endif
+
 /* AC_INCLUDES_DEFAULT */
 #include <stdio.h>
 #ifdef HAVE_SYS_TYPES_H
@@ -105,6 +109,55 @@ extern "C" {
 
 RUBY_SYMBOL_EXPORT_BEGIN
 
+#if defined(__GNUC__) && __GNUC__ >= 4 && __GNUC_MINOR__ >= 3
+# define RUBY_ATTR_ALLOC_SIZE(params) __attribute__ ((__alloc_size__ params))
+#else
+# define RUBY_ATTR_ALLOC_SIZE(params)
+#endif
+
+#ifndef RWYDEBUG
+#if 0
+#define RWY_DEBUG
+#endif
+#endif
+
+#if defined(RWY_DEBUG)
+
+void * rwy_debug_xmalloc(size_t size);
+void * rwy_debug_xmalloc2(size_t n, size_t size);
+void * rwy_debug_xcalloc(size_t n, size_t size);
+void * rwy_debug_xrealloc(void * ptr, size_t size);
+void * rwy_debug_xrealloc2(void * ptr, size_t n, size_t size);
+void rwy_debug_xfree(void * ptr);
+
+#define xmalloc(size) rwy_debug_xmalloc(size)
+#define xmalloc2(n, size) rwy_debug_xmalloc2(n, size)
+#define xcalloc(n, size) rwy_debug_xcalloc(n, size)
+#define xrealloc(ptr, size) rwy_debug_xrealloc(ptr, size)
+#define xrealloc2(ptr, n, size) rwy_debug_xrealloc2(ptr, n, size)
+#define xfree rwy_debug_xfree
+
+#define ruby_xmalloc(size) rwy_debug_xmalloc(size)
+#define ruby_xmalloc2(n, size) rwy_debug_xmalloc2(n, size)
+#define ruby_xcalloc(n, size) rwy_debug_xcalloc(n, size)
+#define ruby_xrealloc(ptr, size) rwy_debug_xrealloc(ptr, size)
+#define ruby_xrealloc2(ptr, n, size) rwy_debug_xrealloc2(ptr, n, size)
+
+/* Ruby tends to pass xfree as a function pointer. xfree must expand without 
+ * being called. Gross, I know. ~RY */
+#define ruby_xfree rwy_debug_xfree
+
+/*
+void * ruby_xmalloc(size_t) RUBY_ATTR_ALLOC_SIZE((1));
+void * ruby_xmalloc2(size_t,size_t) RUBY_ATTR_ALLOC_SIZE((1,2));
+void * ruby_xcalloc(size_t,size_t) RUBY_ATTR_ALLOC_SIZE((1,2));
+void * ruby_xrealloc(void*,size_t) RUBY_ATTR_ALLOC_SIZE((2));
+void * ruby_xrealloc2(void*,size_t,size_t) RUBY_ATTR_ALLOC_SIZE((2,3));
+void ruby_free(void*);
+*/
+
+#else /* defined(RWY_DEBUG) */
+
 #define xmalloc ruby_xmalloc
 #define xmalloc2 ruby_xmalloc2
 #define xcalloc ruby_xcalloc
@@ -112,18 +165,14 @@ RUBY_SYMBOL_EXPORT_BEGIN
 #define xrealloc2 ruby_xrealloc2
 #define xfree ruby_xfree
 
-#if defined(__GNUC__) && __GNUC__ >= 4 && __GNUC_MINOR__ >= 3
-# define RUBY_ATTR_ALLOC_SIZE(params) __attribute__ ((__alloc_size__ params))
-#else
-# define RUBY_ATTR_ALLOC_SIZE(params)
-#endif
-
 void *xmalloc(size_t) RUBY_ATTR_ALLOC_SIZE((1));
 void *xmalloc2(size_t,size_t) RUBY_ATTR_ALLOC_SIZE((1,2));
 void *xcalloc(size_t,size_t) RUBY_ATTR_ALLOC_SIZE((1,2));
 void *xrealloc(void*,size_t) RUBY_ATTR_ALLOC_SIZE((2));
 void *xrealloc2(void*,size_t,size_t) RUBY_ATTR_ALLOC_SIZE((2,3));
 void xfree(void*);
+
+#endif /* else defined(RWY_DEBUG) */
 
 #define STRINGIZE(expr) STRINGIZE0(expr)
 #ifndef STRINGIZE0

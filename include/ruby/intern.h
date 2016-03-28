@@ -487,6 +487,23 @@ void rb_mark_set(struct st_table*);
 void rb_mark_hash(struct st_table*);
 void rb_gc_mark_maybe(VALUE);
 void rb_gc_mark(VALUE);
+
+/*
+ * OMR: The following functions are now used internally, in place of
+ * the rb_gc functions above. Extensions (apart from ripper.y) should
+ * use rb_gc functions. Now that marking is performed in parallel,
+ * the marking thread needs to be passed through to gc marking functions.
+ * In the case of extensions with custom marking functions, the thread will be
+ * retrieved from thread local storage by calling the rb_gc functions, now
+ * wrappers around rb_omr marking functions.
+ */
+void rb_omr_mark_locations(rb_omr_markstate_t, const VALUE*, const VALUE*);
+void rb_omr_mark_tbl(rb_omr_markstate_t, struct st_table*);
+void rb_omr_mark_set(rb_omr_markstate_t, struct st_table*);
+void rb_omr_mark_hash(rb_omr_markstate_t, struct st_table*);
+void rb_omr_mark_maybe(rb_omr_markstate_t, VALUE);
+void rb_omr_mark(rb_omr_markstate_t, VALUE);
+
 void rb_gc_force_recycle(VALUE);
 void rb_gc(void);
 void rb_gc_copy_finalizer(VALUE,VALUE);
@@ -620,6 +637,9 @@ double rb_str_to_dbl(VALUE, int);
 /* parse.y */
 RUBY_EXTERN int   ruby_sourceline;
 RUBY_EXTERN char *ruby_sourcefile;
+#if defined(OMR)
+void* rb_global_symbols(void);
+#endif /* OMR */
 ID rb_id_attrset(ID);
 int rb_is_const_id(ID);
 int rb_is_global_id(ID);

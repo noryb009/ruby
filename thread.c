@@ -65,6 +65,16 @@
 #include "ruby/thread_native.h"
 #include "internal.h"
 
+#if defined(OMR)
+#include "omr.h"
+#include "omrvm.h"
+#include "rbomrinit.h"
+#include "rbgcsupport.h"
+#include "rbomrprofiler.h"
+#include "rbgcsupport.h"
+#include "vmaccess.h"
+#endif /* defined(OMR) */
+
 #ifndef USE_NATIVE_THREAD_PRIORITY
 #define USE_NATIVE_THREAD_PRIORITY 0
 #define RUBY_THREAD_PRIORITY_MAX 3
@@ -134,15 +144,31 @@ static inline void blocking_region_end(rb_thread_t *th, struct rb_blocking_regio
 	SET_MACHINE_STACK_END(&(th)->machine.stack_end);	\
     } while (0)
 
+#if defined(OMR)
+#define GVL_UNLOCK_BEGIN() do { \
+  rb_thread_t *_th_stored = GET_THREAD(); \
+  RB_GC_SAVE_MACHINE_CONTEXT(_th_stored); \
+  release_vm_access(_th_stored); \
+  gvl_release(_th_stored->vm);
+#else /* !OMR */
 #define GVL_UNLOCK_BEGIN() do { \
   rb_thread_t *_th_stored = GET_THREAD(); \
   RB_GC_SAVE_MACHINE_CONTEXT(_th_stored); \
   gvl_release(_th_stored->vm);
+#endif /* OMR */
 
+#if defined(OMR)
+#define GVL_UNLOCK_END() \
+  gvl_acquire(_th_stored->vm, _th_stored); \
+  acquire_vm_access(_th_stored); \
+  rb_thread_set_current(_th_stored); \
+} while(0)
+#else /* !OMR */
 #define GVL_UNLOCK_END() \
   gvl_acquire(_th_stored->vm, _th_stored); \
   rb_thread_set_current(_th_stored); \
 } while(0)
+#endif /* OMR */
 
 #ifdef __GNUC__
 #ifdef HAVE_BUILTIN___BUILTIN_CHOOSE_EXPR_CONSTANT_P
@@ -559,6 +585,19 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     if (th == th->vm->main_thread)
 	rb_bug("thread_start_func_2 must not be used for main thread");
 
+#if defined(OMR)
+    rb_omr_thread_init(th, "ruby-child-thread");
+    /* At this point another thread could have requested VM E(X)clusive access. */
+    omrthread_monitor_enter(GET_VM()->exclusiveAccessMutex);
+    /* It's possible VMX was requested, but before we attached to the list, so we should check the flags. */
+    if (RUBY_XACCESS_NONE != GET_VM()->exclusiveAccessState) {
+	    set_thread_flags(th, RUBY_THREAD_HALT_FOR_EXCLUSIVE);
+    }
+    omrthread_monitor_exit(GET_VM()->exclusiveAccessMutex);
+    /* If VMX is requested at this point this thread will either block in acquire_vm_access or
+     * VMX requesting thread will wait for this thread to release access.*/
+#endif /* defined(OMR) */
+
     ruby_thread_set_native(th);
 
     th->machine.stack_start = stack_start;
@@ -568,6 +607,9 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     thread_debug("thread start: %p\n", (void *)th);
 
     gvl_acquire(th->vm, th);
+#if defined(OMR)
+    acquire_vm_access(th);
+#endif /* OMR */
     {
 	thread_debug("thread start (get lock): %p\n", (void *)th);
 	rb_thread_set_current(th);
@@ -658,9 +700,15 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     /* make sure vm->running_thread never point me after this point.*/
     th->vm->running_thread = NULL;
     native_mutex_unlock(&th->vm->thread_destruct_lock);
+#if defined(OMR)
+    release_vm_access(th);
+    omrthread_monitor_destroy(th->publicFlagsMutex);
+    th->publicFlagsMutex = NULL;
+    OMR_Thread_Free(th->_omrVMThread);
+    th->_omrVMThread = NULL;
+#endif /* defined(OMR) */
     thread_cleanup_func(th, FALSE);
     gvl_release(th->vm);
-
     return 0;
 }
 
@@ -694,6 +742,10 @@ thread_create_core(VALUE thval, VALUE args, VALUE (*fn)(ANYARGS))
     native_mutex_initialize(&th->interrupt_lock);
     native_cond_initialize(&th->interrupt_cond, RB_CONDATTR_CLOCK_MONOTONIC);
 
+#if defined(OMR)
+	/* Init child thread's mutex before allowing it to attach, in order to allow the thread to be walked. */
+	omrthread_monitor_init_with_name(&th->publicFlagsMutex, 0, "Thread flags mutex");
+#endif /* OMR */
     /* kick thread */
     err = native_thread_create(th);
     if (err) {
@@ -1206,7 +1258,13 @@ rb_thread_schedule_limits(unsigned long limits_us)
 	if (th->running_time_us >= limits_us) {
 	    thread_debug("rb_thread_schedule/switch start\n");
 	    RB_GC_SAVE_MACHINE_CONTEXT(th);
+#if defined(OMR)
+	    release_vm_access(th);
+#endif /* OMR */
 	    gvl_yield(th->vm, th);
+#if defined(OMR)
+	    acquire_vm_access(th);
+#endif /* OMR */
 	    rb_thread_set_current(th);
 	    thread_debug("rb_thread_schedule/switch done\n");
 	}
@@ -1235,6 +1293,9 @@ blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
 	thread_debug("enter blocking region (%p)\n", (void *)th);
 	RB_GC_SAVE_MACHINE_CONTEXT(th);
 	gvl_release(th->vm);
+#if defined(OMR)
+	release_vm_access(th);
+#endif /* OMR */
 	return TRUE;
     }
     else {
@@ -1246,6 +1307,14 @@ static inline void
 blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region)
 {
     gvl_acquire(th->vm, th);
+#if defined(OMR)
+    /* Order is important, consider:
+     * Thread (1) has GVL and is waiting to acquire exclusive as part of a normal GC.
+     * Thread (2) is finishing an async blocking region, and wants to reacquire GVl and vm_access
+     * Thread (2) must therefore wait on the GVL before it can obtain vm_access.
+     */
+    acquire_vm_access(th);
+#endif /* OMR */
     rb_thread_set_current(th);
     thread_debug("leave blocking region (%p)\n", (void *)th);
     remove_signal_thread_list(th);
@@ -2005,6 +2074,10 @@ rb_threadptr_execute_interrupts(rb_thread_t *th, int blocking_timing)
 
 	if (timer_interrupt) {
 	    unsigned long limits_us = TIME_QUANTUM_USEC;
+
+#if defined(OMR)
+	    rb_omr_checkSampleStack(th, RB_OMR_SAMPLESTACK_BACKOFF_TIMER_DECR);
+#endif /* defined(OMR) */
 
 	    if (th->priority > 0)
 		limits_us <<= th->priority;
@@ -3886,6 +3959,10 @@ rb_thread_atfork(void)
 
     /* We don't want reproduce CVE-2003-0900. */
     rb_reset_random_seed();
+
+#if defined(OMR)
+    omrGCAfterFork();
+#endif /* OMR */
 }
 
 static void
@@ -4138,7 +4215,7 @@ mutex_memsize(const void *ptr)
 static const rb_data_type_t mutex_data_type = {
     "mutex",
     {mutex_mark, mutex_free, mutex_memsize,},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_PARALLEL_FREE
 };
 
 VALUE
@@ -4582,7 +4659,7 @@ void rb_mutex_allow_trap(VALUE self, int val)
 static void
 thread_shield_mark(void *ptr)
 {
-    rb_gc_mark((VALUE)ptr);
+    rb_omr_mark(rb_omr_get_markstate(), (VALUE)ptr);
 }
 
 static const rb_data_type_t thread_shield_data_type = {
@@ -5086,6 +5163,9 @@ Init_Thread(void)
 	    /* acquire global vm lock */
 	    gvl_init(th->vm);
 	    gvl_acquire(th->vm, th);
+#if defined(OMR)
+	    acquire_vm_access(th);
+#endif /* OMR */
 	    native_mutex_initialize(&th->vm->thread_destruct_lock);
 	    native_mutex_initialize(&th->interrupt_lock);
 	    native_cond_initialize(&th->interrupt_cond,

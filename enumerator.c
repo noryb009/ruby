@@ -12,6 +12,8 @@
 
 ************************************************/
 
+
+#include "ruby/ruby.h"
 #include "internal.h"
 #include "node.h"
 
@@ -164,10 +166,10 @@ static const rb_data_type_t enumerator_data_type = {
     "enumerator",
     {
 	enumerator_mark,
-	enumerator_free,
+	0,
 	enumerator_memsize,
     },
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 static struct enumerator *

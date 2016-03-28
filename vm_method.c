@@ -139,14 +139,14 @@ rb_unlink_method_entry(rb_method_entry_t *me)
 }
 
 void
-rb_gc_mark_unlinked_live_method_entries(void *pvm)
+rb_gc_mark_unlinked_live_method_entries(void *pvm, rb_omr_markstate_t ms)
 {
     rb_vm_t *vm = pvm;
     struct unlinked_method_entry_list_entry *ume = vm->unlinked_method_entry_list;
 
     while (ume) {
 	if (ume->me->mark) {
-	    rb_mark_method_entry(ume->me);
+	    rb_omr_mark_method_entry(ms, ume->me);
 	}
 	ume = ume->next;
     }
@@ -509,6 +509,9 @@ rb_add_method(VALUE klass, ID mid, rb_method_type_t type, void *opts, rb_method_
     }
     if (type != VM_METHOD_TYPE_UNDEF && type != VM_METHOD_TYPE_REFINED) {
 	method_added(klass, mid);
+#if defined(OMR)
+        rb_omr_insertMethodEntryInMethodDictionary(GET_VM(), me);
+#endif /* defined(OMR) */
     }
     return me;
 }
@@ -521,6 +524,9 @@ method_entry_set(VALUE klass, ID mid, const rb_method_entry_t *me,
     rb_method_entry_t *newme = rb_method_entry_make(klass, mid, type, me->def, noex,
 						    defined_class);
     method_added(klass, mid);
+#if defined(OMR)
+    rb_omr_insertMethodEntryInMethodDictionary(GET_VM(), newme);
+#endif /* defined(OMR) */
     return newme;
 }
 

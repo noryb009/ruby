@@ -7,6 +7,7 @@
 #include "st.h"
 #else
 #include "internal.h"
+#include "rbgcsupport.h"
 #endif
 
 #include <stdio.h>
@@ -14,21 +15,6 @@
 #include <stdlib.h>
 #endif
 #include <string.h>
-
-typedef struct st_table_entry st_table_entry;
-
-struct st_table_entry {
-    st_index_t hash;
-    st_data_t key;
-    st_data_t record;
-    st_table_entry *next;
-    st_table_entry *fore, *back;
-};
-
-typedef struct st_packed_entry {
-    st_index_t hash;
-    st_data_t key, val;
-} st_packed_entry;
 
 #ifndef STATIC_ASSERT
 #define STATIC_ASSERT(name, expr) typedef int static_assert_##name##_check[(expr) ? 1 : -1]
@@ -62,13 +48,13 @@ const struct st_hash_type st_hashtype_num = {
 /* extern int strcmp(const char *, const char *); */
 static st_index_t strhash(st_data_t);
 static const struct st_hash_type type_strhash = {
-    strcmp,
+    (st_comparator)strcmp,
     strhash,
 };
 
 static st_index_t strcasehash(st_data_t);
 static const struct st_hash_type type_strcasehash = {
-    st_locale_insensitive_strcasecmp,
+    (st_comparator)st_locale_insensitive_strcasecmp,
     strcasehash,
 };
 
@@ -91,16 +77,36 @@ static void rehash(st_table *);
 #define hash_pos(h,n) ((h) & (n - 1))
 
 /* preparation for possible allocation improvements */
-#define st_alloc_entry() (st_table_entry *)malloc(sizeof(st_table_entry))
-#define st_free_entry(entry) free(entry)
-#define st_alloc_table() (st_table *)malloc(sizeof(st_table))
-#define st_dealloc_table(table) free(table)
-#define st_alloc_bins(size) (st_table_entry **)calloc(size, sizeof(st_table_entry *))
-#define st_free_bins(bins, size) free(bins)
+
+#define IS_OBJHASH(table) (table->heap_allocated)
+
+#define ST_ALLOC(table, type) (IS_OBJHASH(table) ?\
+	(type *)alloc_omr_buffer(sizeof(type)) : (type *)malloc(sizeof(type)))
+
+#define ST_ALLOC_WITH_SIZE(table, type, size) (IS_OBJHASH(table) ?\
+	(type *)alloc_omr_buffer(sizeof(type) * size) : (type *)malloc(sizeof(type) * size))
+
+#define ST_FREE(table, ptr) (IS_OBJHASH(table) ?\
+	0 : (free(ptr), 0))
+
+#define st_alloc_entry(table) ST_ALLOC(table, st_table_entry)
+#define st_free_entry(table, entry) ST_FREE(table, entry)
+#define st_alloc_table(doHeapAlloc) (doHeapAlloc ?\
+	(st_table *)alloc_omr_buffer(sizeof(st_table)) : (st_table *)malloc(sizeof(st_table)))
+#define st_dealloc_table(table) ST_FREE(table, table)
+#define st_alloc_bins(table, size) (IS_OBJHASH(table) ?\
+	(st_table_entry **)calloc_omr_buffer(size, sizeof(st_table_entry *)) : (st_table_entry **)calloc(size, sizeof(st_table_entry *)))
+
+#define st_free_bins(table, bins, size) ST_FREE(table, bins)
+
 static inline st_table_entry**
-st_realloc_bins(st_table_entry **bins, st_index_t newsize, st_index_t oldsize)
+st_realloc_bins(st_table *table, st_table_entry **bins, st_index_t newsize, st_index_t oldsize)
 {
-    bins = (st_table_entry **)realloc(bins, newsize * sizeof(st_table_entry *));
+    if (table->heap_allocated) {
+	bins = (st_table_entry **)realloc_omr_buffer(bins, newsize * sizeof(st_table_entry *));
+    } else {
+	bins = (st_table_entry **)realloc(bins, newsize * sizeof(st_table_entry *));
+    }
     MEMZERO(bins, st_table_entry*, newsize);
     return bins;
 }
@@ -194,8 +200,9 @@ stat_col(void)
 }
 #endif
 
-st_table*
-st_init_table_with_size(const struct st_hash_type *type, st_index_t size)
+
+st_table *
+st_init_table_with_size_internal(const struct st_hash_type *type, st_index_t size, int doHeapAlloc)
 {
     st_table *tbl;
 
@@ -212,8 +219,9 @@ st_init_table_with_size(const struct st_hash_type *type, st_index_t size)
     }
 #endif
 
+    tbl = st_alloc_table(doHeapAlloc);
 
-    tbl = st_alloc_table();
+    tbl->heap_allocated = doHeapAlloc;
     tbl->type = type;
     tbl->num_entries = 0;
     tbl->entries_packed = size <= MAX_PACKED_HASH;
@@ -224,11 +232,29 @@ st_init_table_with_size(const struct st_hash_type *type, st_index_t size)
 	size = new_size(size);	/* round up to power-of-two */
     }
     tbl->num_bins = size;
-    tbl->bins = st_alloc_bins(size);
+    tbl->bins = st_alloc_bins(tbl, size);
     tbl->head = 0;
     tbl->tail = 0;
 
     return tbl;
+}
+
+st_table*
+st_init_table_with_size_heapalloc(const struct st_hash_type *type, st_index_t size)
+{
+    return st_init_table_with_size_internal(type, size, 1);
+}
+
+st_table*
+st_init_table_with_size(const struct st_hash_type *type, st_index_t size)
+{
+    return st_init_table_with_size_internal(type, size, 0);
+}
+
+st_table*
+st_init_table_heapalloc(const struct st_hash_type *type)
+{
+    return st_init_table_with_size_heapalloc(type, 0);
 }
 
 st_table*
@@ -241,6 +267,13 @@ st_table*
 st_init_numtable(void)
 {
     return st_init_table(&type_numhash);
+}
+
+
+st_table*
+st_init_numtable_heapalloc(void)
+{
+    return st_init_table_heapalloc(&type_numhash);
 }
 
 st_table*
@@ -290,7 +323,7 @@ st_clear(st_table *table)
 	table->bins[i] = 0;
 	while (ptr != 0) {
 	    next = ptr->next;
-	    st_free_entry(ptr);
+	    st_free_entry(table, ptr);
 	    ptr = next;
 	}
     }
@@ -303,7 +336,7 @@ void
 st_free_table(st_table *table)
 {
     st_clear(table);
-    st_free_bins(table->bins, table->num_bins);
+    st_free_bins(table, table->bins, table->num_bins);
     st_dealloc_table(table);
 }
 
@@ -442,7 +475,7 @@ static inline st_table_entry *
 new_entry(st_table * table, st_data_t key, st_data_t value,
 	st_index_t hash_val, register st_index_t bin_pos)
 {
-    register st_table_entry *entry = st_alloc_entry();
+    register st_table_entry *entry = st_alloc_entry(table);
 
     entry->next = table->bins[bin_pos];
     table->bins[bin_pos] = entry;
@@ -487,13 +520,17 @@ unpack_entries(register st_table *table)
 
     MEMCPY(packed_bins, PACKED_BINS(table), st_packed_entry, MAX_PACKED_HASH);
     table->as.packed.entries = packed_bins;
+    /* Because we've just made table.bins stack-allocated, going to disable the fact the table is heap-allocated, otherwise
+     * we might accidentally try to mark a stack-allocated omr_buf */
+    table->heap_allocated = 0;
     tmp_table.entries_packed = 0;
 #if ST_DEFAULT_INIT_TABLE_SIZE == ST_DEFAULT_PACKED_TABLE_SIZE
     MEMZERO(tmp_table.bins, st_table_entry*, tmp_table.num_bins);
 #else
-    tmp_table.bins = st_realloc_bins(tmp_table.bins, ST_DEFAULT_INIT_TABLE_SIZE, tmp_table.num_bins);
+    tmp_table.bins = st_realloc_bins(&tmp_table, tmp_table.bins, ST_DEFAULT_INIT_TABLE_SIZE, tmp_table.num_bins);
     tmp_table.num_bins = ST_DEFAULT_INIT_TABLE_SIZE;
 #endif
+
     i = 0;
     chain = &tmp_table.head;
     do {
@@ -615,7 +652,7 @@ rehash(register st_table *table)
     st_index_t new_num_bins, hash_val;
 
     new_num_bins = new_size(table->num_bins+1);
-    new_bins = st_realloc_bins(table->bins, new_num_bins, table->num_bins);
+    new_bins = st_realloc_bins(table, table->bins, new_num_bins, table->num_bins);
     table->num_bins = new_num_bins;
     table->bins = new_bins;
 
@@ -636,32 +673,33 @@ st_copy(st_table *old_table)
     st_index_t num_bins = old_table->num_bins;
     st_index_t hash_val;
 
-    new_table = st_alloc_table();
+    new_table = st_alloc_table(old_table->heap_allocated);
+
     if (new_table == 0) {
-	return 0;
+	goto error;
     }
 
     *new_table = *old_table;
-    new_table->bins = st_alloc_bins(num_bins);
+    new_table->bins = st_alloc_bins(new_table, num_bins);
 
     if (new_table->bins == 0) {
 	st_dealloc_table(new_table);
-	return 0;
+	goto error;
     }
 
     if (old_table->entries_packed) {
-        MEMCPY(new_table->bins, old_table->bins, st_table_entry*, old_table->num_bins);
-        return new_table;
+	MEMCPY(new_table->bins, old_table->bins, st_table_entry*, old_table->num_bins);
+	goto finish;
     }
 
     if ((ptr = old_table->head) != 0) {
 	prev = 0;
 	tailp = &new_table->head;
 	do {
-	    entry = st_alloc_entry();
+	    entry = st_alloc_entry(new_table);
 	    if (entry == 0) {
 		st_free_table(new_table);
-		return 0;
+		goto error;
 	    }
 	    *entry = *ptr;
 	    hash_val = hash_pos(entry->hash, num_bins);
@@ -674,7 +712,13 @@ st_copy(st_table *old_table)
 	new_table->tail = prev;
     }
 
+finish:
+
     return new_table;
+
+error:
+
+    return NULL;
 }
 
 static inline void
@@ -722,7 +766,7 @@ st_delete(register st_table *table, register st_data_t *key, st_data_t *value)
 	    remove_entry(table, ptr);
 	    if (value != 0) *value = ptr->record;
 	    *key = ptr->key;
-	    st_free_entry(ptr);
+	    st_free_entry(table, ptr);
 	    return 1;
 	}
     }
@@ -791,7 +835,7 @@ st_shift(register st_table *table, register st_data_t *key, st_data_t *value)
     if (value != 0) *value = ptr->record;
     *key = ptr->key;
     remove_entry(table, ptr);
-    st_free_entry(ptr);
+    st_free_entry(table, ptr);
     return 1;
 }
 
@@ -823,7 +867,7 @@ st_cleanup_safe(st_table *table, st_data_t never)
 	    if (ptr->key == never) {
 		tmp = ptr;
 		*last = ptr = ptr->next;
-		st_free_entry(tmp);
+		st_free_entry(table, tmp);
 	    }
 	    else {
 		ptr = *(last = &ptr->next);
@@ -904,7 +948,7 @@ st_update(st_table *table, st_data_t key, st_update_callback_func *func, st_data
 		if (ptr == tmp) {
 		    *last = ptr->next;
 		    remove_entry(table, ptr);
-		    st_free_entry(ptr);
+		    st_free_entry(table, ptr);
 		    break;
 		}
 	    }
@@ -1063,7 +1107,7 @@ st_foreach(st_table *table, int (*func)(ANYARGS), st_data_t arg)
 			tmp = ptr->fore;
 			*last = ptr->next;
 			remove_entry(table, ptr);
-			st_free_entry(ptr);
+			st_free_entry(table, ptr);
 			ptr = tmp;
 			break;
 		    }
@@ -1072,6 +1116,11 @@ st_foreach(st_table *table, int (*func)(ANYARGS), st_data_t arg)
 	} while (ptr && table->head);
     }
     return 0;
+}
+
+int st_foreach2(st_table *table, int (*func)(st_data_t key, st_data_t val, st_data_t arg), st_data_t arg)
+{
+    return st_foreach(table, func, arg);
 }
 
 static st_index_t
@@ -1307,7 +1356,7 @@ st_reverse_foreach(st_table *table, int (*func)(ANYARGS), st_data_t arg)
 			tmp = ptr->back;
 			*last = ptr->next;
 			remove_entry(table, ptr);
-			st_free_entry(ptr);
+			st_free_entry(table, ptr);
 			ptr = tmp;
 			break;
 		    }
@@ -1745,11 +1794,4 @@ int
 st_numcmp(st_data_t x, st_data_t y)
 {
     return x != y;
-}
-
-st_index_t
-st_numhash(st_data_t n)
-{
-    enum {s1 = 11, s2 = 3};
-    return (st_index_t)((n>>s1|(n<<s2)) ^ (n>>s2));
 }

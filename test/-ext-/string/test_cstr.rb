@@ -5,6 +5,7 @@ class Test_StringCStr < Test::Unit::TestCase
   Bug4319 = '[ruby-dev:43094]'
 
   def test_embed
+    skip "OMRTODO: Test disabled. Obviously will not work if we embed all strings"
     s = Bug::String.new("abcdef")
     s.set_len(3)
     assert_equal(0, s.cstr_term, Bug4319)

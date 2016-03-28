@@ -17,6 +17,11 @@
 #include "node.h"
 #include "constant.h"
 #include "id.h"
+#include "vm_core.h"
+
+#if defined(OMR)
+#include "rbgcsupport.h"
+#endif /* defined(OMR) */
 
 st_table *rb_global_tbl;
 static ID autoload, classpath, tmp_classpath, classid;
@@ -25,6 +30,7 @@ void
 Init_var_tables(void)
 {
     rb_global_tbl = st_init_numtable();
+
     autoload = rb_intern_const("__autoload__");
     /* __classpath__: fully qualified class path */
     classpath = rb_intern_const("__classpath__");
@@ -134,7 +140,7 @@ find_class_path(VALUE klass, ID preferred)
     if (arg.path) {
 	st_data_t tmp = tmp_classpath;
 	if (!RCLASS_IV_TBL(klass)) {
-	    RCLASS_IV_TBL(klass) = st_init_numtable();
+	    RCLASS_IV_TBL(klass) = st_init_numtable(); /* TODO: Buffer write barrier. ~RY */
 	}
 	rb_st_insert_id_and_value(klass, RCLASS_IV_TBL(klass), (st_data_t)classpath, arg.path);
 
@@ -511,7 +517,7 @@ void
 val_marker(VALUE *var)
 {
     VALUE data = (VALUE)var;
-    if (data) rb_gc_mark_maybe(data);
+    if (data) rb_omr_mark_maybe(rb_omr_get_markstate(), data);
 }
 
 VALUE
@@ -531,7 +537,7 @@ var_setter(VALUE val, ID id, void *data, struct global_variable *gvar)
 void
 var_marker(VALUE *var)
 {
-    if (var) rb_gc_mark_maybe(*var);
+    if (var) rb_omr_mark_maybe(rb_omr_get_markstate(), *var);
 }
 
 void
@@ -550,17 +556,17 @@ mark_global_entry(st_data_t k, st_data_t v, st_data_t a)
     (*var->marker)(var->data);
     trace = var->trace;
     while (trace) {
-	if (trace->data) rb_gc_mark_maybe(trace->data);
+	if (trace->data) rb_omr_mark_maybe((rb_omr_markstate_t)a, trace->data);
 	trace = trace->next;
     }
     return ST_CONTINUE;
 }
 
 void
-rb_gc_mark_global_tbl(void)
+rb_gc_mark_global_tbl(rb_omr_markstate_t ms)
 {
     if (rb_global_tbl)
-        st_foreach_safe(rb_global_tbl, mark_global_entry, 0);
+        st_foreach_safe(rb_global_tbl, mark_global_entry, (st_data_t)ms);
 }
 
 static ID
@@ -900,12 +906,35 @@ rb_alias_variable(ID name1, ID name2)
 }
 
 static int special_generic_ivar = 0;
-static st_table *generic_iv_tbl;
+#if defined(SPLIT_IVAR_TBL)
+st_table *generic_iv_tbls[IVAR_TBL_COUNT] = {0};
+#define GET_IVAR_TBL(obj) generic_iv_tbls[st_numhash(obj) % IVAR_TBL_COUNT]
+#else /* defined(SPLIT_IVAR_TBL) */
+st_table *generic_iv_tbl;
+#endif /* defined(SPLIT_IVAR_TBL) */
+
+static void
+init_generic_iv_tbl(void)
+{
+    int i = 0;
+#if defined(SPLIT_IVAR_TBL)
+    /* Init all tables at once, safer. */
+    for (i = 0; i < IVAR_TBL_COUNT; i++) {
+	assert(NULL == generic_iv_tbls[i]);
+	generic_iv_tbls[i] = st_init_numtable_heapalloc();
+    }
+#else
+    generic_iv_tbl = st_init_numtable();
+#endif
+}
 
 st_table*
 rb_generic_ivar_table(VALUE obj)
 {
     st_data_t tbl;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (!FL_TEST(obj, FL_EXIVAR)) return 0;
     if (!generic_iv_tbl) return 0;
@@ -917,6 +946,9 @@ static VALUE
 generic_ivar_get(VALUE obj, ID id, VALUE undef)
 {
     st_data_t tbl, val;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (generic_iv_tbl) {
 	if (st_lookup(generic_iv_tbl, (st_data_t)obj, &tbl)) {
@@ -936,11 +968,12 @@ generic_ivar_update(st_data_t *k, st_data_t *v, st_data_t a, int existing)
 
     if (!existing) {
 	FL_SET(obj, FL_EXIVAR);
-	*v = (st_data_t)(*tbl = st_init_numtable());
+	*tbl = st_init_numtable_heapalloc();
+	*v = (st_data_t) *tbl;
 	return ST_CONTINUE;
     }
     else {
-	*tbl = (st_table *)*v;
+	*tbl = (st_table*) *v;
 	return ST_STOP;
     }
 }
@@ -949,13 +982,17 @@ static void
 generic_ivar_set(VALUE obj, ID id, VALUE val)
 {
     st_table *tbl;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (rb_special_const_p(obj)) {
 	if (rb_obj_frozen_p(obj)) rb_error_frozen("object");
 	special_generic_ivar = 1;
     }
     if (!generic_iv_tbl) {
-	generic_iv_tbl = st_init_numtable();
+	init_generic_iv_tbl();
+	generic_iv_tbl = GET_IVAR_TBL(obj);
     }
     if (!st_update(generic_iv_tbl, (st_data_t)obj,
 		   generic_ivar_update, (st_data_t)&tbl)) {
@@ -972,6 +1009,9 @@ generic_ivar_defined(VALUE obj, ID id)
 {
     st_table *tbl;
     st_data_t data;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (!generic_iv_tbl) return Qfalse;
     if (!st_lookup(generic_iv_tbl, (st_data_t)obj, &data)) return Qfalse;
@@ -988,6 +1028,9 @@ generic_ivar_remove(VALUE obj, ID id, st_data_t *valp)
     st_table *tbl;
     st_data_t data, key = (st_data_t)id;
     int status;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (!generic_iv_tbl) return 0;
     if (!st_lookup(generic_iv_tbl, (st_data_t)obj, &data)) return 0;
@@ -996,19 +1039,25 @@ generic_ivar_remove(VALUE obj, ID id, st_data_t *valp)
     if (tbl->num_entries == 0) {
 	key = (st_data_t)obj;
 	st_delete(generic_iv_tbl, &key, &data);
-	st_free_table((st_table *)data);
     }
     return status;
 }
 
 void
-rb_mark_generic_ivar(VALUE obj)
+rb_mark_generic_ivar(rb_omr_markstate_t ms, VALUE obj)
 {
     st_data_t tbl;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
 
     if (!generic_iv_tbl) return;
     if (st_lookup(generic_iv_tbl, (st_data_t)obj, &tbl)) {
-	rb_mark_tbl((st_table *)tbl);
+	st_table *tblPtr =(st_table*) tbl;
+	if (tblPtr->heap_allocated) {
+	    rb_omr_mark_st_table(ms, tblPtr);
+	}
+	rb_omr_mark_tbl(ms, tblPtr);
     }
 }
 
@@ -1016,7 +1065,7 @@ static int
 givar_mark_i(st_data_t k, st_data_t v, st_data_t a)
 {
     VALUE value = (VALUE)v;
-    rb_gc_mark(value);
+    rb_omr_mark((rb_omr_markstate_t)a, value);
     return ST_CONTINUE;
 }
 
@@ -1026,33 +1075,68 @@ givar_i(st_data_t k, st_data_t v, st_data_t a)
     VALUE obj = (VALUE)k;
     st_table *tbl = (st_table *)v;
     if (rb_special_const_p(obj)) {
+#if defined(OMR)
+	if (tbl->heap_allocated) {
+	    rb_omr_mark_st_table((rb_omr_markstate_t)a, tbl);
+	}
+	st_foreach_safe(tbl, givar_mark_i, a);
+#else /* OMR */
 	st_foreach_safe(tbl, givar_mark_i, 0);
+#endif /* OMR */
     }
     return ST_CONTINUE;
 }
 
 void
-rb_mark_generic_ivar_tbl(void)
+rb_mark_generic_ivar_tbl(rb_omr_markstate_t ms)
 {
-    if (!generic_iv_tbl) return;
+    int i;
+
     if (special_generic_ivar == 0) return;
+#if defined(OMR)
+#if defined(SPLIT_IVAR_TBL)
+    for (i = 0; i < IVAR_TBL_COUNT; i++) {
+	st_table *generic_iv_tbl = generic_iv_tbls[i];
+	if (NULL != generic_iv_tbl) {
+#if 0
+	/* Previous we would call the this.  I believe there's a bug here as st_for_each_safe ignores
+	 * keys with the value 0.  Howevever, 0 is a valid object in Ruby, it is QFalse.  This means
+	 * we don't mark the ivar table for QFalse.
+	 *
+	 * This likely just worked previously because it would just
+	 * mean we would miss scanning the ivar table for QFalse which would only affect things if it
+	 * were the sole thing keeping its ivars alive.  However when we started heap-allocating the
+	 * st_table for the ivar table, this means nothing was keeping the ivar table alive.
+	 */
+	    st_foreach_safe(generic_iv_tbl, givar_i, (st_data_t)markTh);
+#else
+	    /*TODO: figure out an st_for_each_safe function that does will not ignore 0 (or just allow all values) */
+	    st_foreach(generic_iv_tbl, givar_i, (st_data_t)ms);
+#endif
+	}
+    }
+#else /* defined(SPLIT_IVAR_TBL) */
+    if (!generic_iv_tbl) return;
+    st_foreach_safe(generic_iv_tbl, givar_i, (st_data_t)ms);
+#endif /* defined(SPLIT_IVAR_TBL) */
+#else /* OMR */
     st_foreach_safe(generic_iv_tbl, givar_i, 0);
+#endif /* OMR */
 }
 
 void
 rb_free_generic_ivar(VALUE obj)
 {
-    st_data_t key = (st_data_t)obj, tbl;
-
-    if (!generic_iv_tbl) return;
-    if (st_delete(generic_iv_tbl, &key, &tbl))
-	st_free_table((st_table *)tbl);
+    /* nothing to do with on heap data */
 }
 
 RUBY_FUNC_EXPORTED size_t
 rb_generic_ivar_memsize(VALUE obj)
 {
     st_data_t tbl;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
     if (st_lookup(generic_iv_tbl, (st_data_t)obj, &tbl))
 	return st_memsize((st_table *)tbl);
     return 0;
@@ -1061,9 +1145,16 @@ rb_generic_ivar_memsize(VALUE obj)
 void
 rb_copy_generic_ivar(VALUE clone, VALUE obj)
 {
+#if defined(SPLIT_IVAR_TBL)
+    st_table *obj_generic_iv_tbl = GET_IVAR_TBL(obj);
+    st_table *clone_generic_iv_tbl = GET_IVAR_TBL(clone);
+#else
+    st_table *obj_generic_iv_tbl = generic_iv_tbl;
+    st_table *clone_generic_iv_tbl = generic_iv_tbl;
+#endif
     st_data_t data;
 
-    if (!generic_iv_tbl) return;
+    if (!obj_generic_iv_tbl) return;
     if (!FL_TEST(obj, FL_EXIVAR)) {
       clear:
         if (FL_TEST(clone, FL_EXIVAR)) {
@@ -1072,18 +1163,17 @@ rb_copy_generic_ivar(VALUE clone, VALUE obj)
         }
         return;
     }
-    if (st_lookup(generic_iv_tbl, (st_data_t)obj, &data)) {
+    if (st_lookup(obj_generic_iv_tbl, (st_data_t)obj, &data)) {
 	st_table *tbl = (st_table *)data;
 
         if (tbl->num_entries == 0)
             goto clear;
 
-	if (st_lookup(generic_iv_tbl, (st_data_t)clone, &data)) {
-	    st_free_table((st_table *)data);
-	    st_insert(generic_iv_tbl, (st_data_t)clone, (st_data_t)st_copy(tbl));
+	if (st_lookup(clone_generic_iv_tbl, (st_data_t)clone, &data)) {
+	    st_insert(clone_generic_iv_tbl, (st_data_t)clone, (st_data_t)st_copy(tbl));
 	}
 	else {
-	    st_add_direct(generic_iv_tbl, (st_data_t)clone, (st_data_t)st_copy(tbl));
+	    st_add_direct(clone_generic_iv_tbl, (st_data_t)clone, (st_data_t)st_copy(tbl));
 	    FL_SET(clone, FL_EXIVAR);
 	}
     }
@@ -1189,13 +1279,13 @@ rb_ivar_set(VALUE obj, ID id, VALUE val)
                 }
 
                 if (RBASIC(obj)->flags & ROBJECT_EMBED) {
-                    newptr = ALLOC_N(VALUE, newsize);
+                    newptr = alloc_omr_buffer(sizeof(VALUE)*newsize);
                     MEMCPY(newptr, ptr, VALUE, len);
                     RBASIC(obj)->flags &= ~ROBJECT_EMBED;
                     ROBJECT(obj)->as.heap.ivptr = newptr;
                 }
                 else {
-                    REALLOC_N(ROBJECT(obj)->as.heap.ivptr, VALUE, newsize);
+                    ROBJECT(obj)->as.heap.ivptr = realloc_omr_buffer(ROBJECT(obj)->as.heap.ivptr, sizeof(VALUE) * newsize);
                     newptr = ROBJECT(obj)->as.heap.ivptr;
                 }
                 for (; len < newsize; len++)
@@ -1208,7 +1298,7 @@ rb_ivar_set(VALUE obj, ID id, VALUE val)
 	break;
       case T_CLASS:
       case T_MODULE:
-	if (!RCLASS_IV_TBL(obj)) RCLASS_IV_TBL(obj) = st_init_numtable();
+	if (!RCLASS_IV_TBL(obj)) RCLASS_IV_TBL(obj) = st_init_numtable(); /* TODO: Buffer write barrier. ~RY */
 	rb_st_insert_id_and_value(obj, RCLASS_IV_TBL(obj), (st_data_t)id, val);
         break;
       default:
@@ -1289,6 +1379,10 @@ obj_ivar_each(VALUE obj, int (*func)(ANYARGS), st_data_t arg)
 void
 rb_ivar_foreach(VALUE obj, int (*func)(ANYARGS), st_data_t arg)
 {
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
+
     if (SPECIAL_CONST_P(obj)) goto generic;
     switch (BUILTIN_TYPE(obj)) {
       case T_OBJECT:
@@ -1318,6 +1412,9 @@ st_index_t
 rb_ivar_count(VALUE obj)
 {
     st_table *tbl;
+#if defined(SPLIT_IVAR_TBL)
+    st_table *generic_iv_tbl = GET_IVAR_TBL(obj);
+#endif
     if (SPECIAL_CONST_P(obj)) goto generic;
     switch (BUILTIN_TYPE(obj)) {
       case T_OBJECT:
@@ -1544,7 +1641,7 @@ rb_mod_const_missing(VALUE klass, VALUE name)
 static void
 autoload_mark(void *ptr)
 {
-    rb_mark_tbl((st_table *)ptr);
+    rb_omr_mark_tbl(rb_omr_get_markstate(), (st_table *)ptr);
 }
 
 static void
@@ -1593,9 +1690,10 @@ static void
 autoload_i_mark(void *ptr)
 {
     struct autoload_data_i *p = ptr;
-    rb_gc_mark(p->feature);
-    rb_gc_mark(p->thread);
-    rb_gc_mark(p->value);
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
+    rb_omr_mark(ms, p->feature);
+    rb_omr_mark(ms, p->thread);
+    rb_omr_mark(ms, p->value);
 }
 
 static size_t
@@ -2187,7 +2285,7 @@ rb_const_set(VALUE klass, ID id, VALUE val)
 
     check_before_mod_set(klass, id, val, "constant");
     if (!RCLASS_CONST_TBL(klass)) {
-	RCLASS_CONST_TBL(klass) = st_init_numtable();
+	RCLASS_CONST_TBL(klass) = st_init_numtable(); /* TODO: Buffer write barrier. ~RY */
     }
     else {
 	ce = rb_const_lookup(klass, id);
@@ -2385,7 +2483,7 @@ rb_cvar_set(VALUE klass, ID id, VALUE val)
 
     check_before_mod_set(target, id, val, "class variable");
     if (!RCLASS_IV_TBL(target)) {
-	RCLASS_IV_TBL(target) = st_init_numtable();
+	RCLASS_IV_TBL(target) = st_init_numtable(); /* TODO: Buffer write barrier. ~RY */
     }
 
     rb_st_insert_id_and_value(target, RCLASS_IV_TBL(target), (st_data_t)id, (st_data_t)val);
