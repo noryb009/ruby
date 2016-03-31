@@ -5,6 +5,39 @@ programming.  It has many features to process text files and to do system
 management tasks (as in Perl).  It is simple, straight-forward, and
 extensible.
 
+## Ruby + OMR Technology Preview
+
+This is an experimental version of Ruby integrated with the [Eclipse OMR Project](https://github.com/eclipse/omr).
+Eclipse OMR is an open source C/C++ collection of language runtime technologies.
+
+Visit [Ruby + OMR Technology Preview](https://github.com/rubyomr-preview/rubyomr-preview)
+to get more details about this technology preview.
+
+Our current Ruby + OMR changes are based on Ruby 2.2. We have created
+a branch named ruby_2_2_omr, the default branch in this fork, containing a single
+commit to show the changes needed to incorporate Eclipse OMR into Ruby.
+
+## Building Ruby + OMR
+
+Simplified steps to build Ruby + OMR.  See more detailed instructions below to
+modify the install location, etc.
+```
+$ git clone https://github.com/rubyomr-preview/ruby.git --branch ruby_2_2_omr --recursive 
+$ cd ruby
+$ autoconf
+$ ./configure SPEC=<specname>
+$ make
+$ make install
+```
+Since the Ruby + OMR code has only been tested on Linux x86-64, Linux PPC-LE-64, Linux PPC-BE-64
+and Linux 390-64 the acceptable values for `<specname>` are:
+```
+1. linux_x86-64
+2. linux_ppc-64_le_gcc
+3. linux_ppc-64
+4. linux_390-64
+```
+
 ## Features of Ruby
 
 *   Simple Syntax
