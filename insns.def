@@ -1034,10 +1034,15 @@ send
 (...)
 (VALUE val) // inc += - (int)(ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0));
 {
+#if defined(JIT_INTERFACE)
+    VALUE v = vm_send(th, ci, reg_cfp);
+    CHECK_CALL_RETVAL(v);
+#else /* defined(JIT_INTERFACE) */
     ci->argc = ci->orig_argc;
     vm_caller_setup_arg_block(th, reg_cfp, ci, FALSE);
     vm_search_method(ci, ci->recv = TOPN(ci->argc));
     CALL_METHOD(ci);
+#endif /* defined(JIT_INTERFACE) */
 }
 
 DEFINE_INSN
@@ -1065,9 +1070,14 @@ opt_send_without_block
 (...)
 (VALUE val) // inc += -ci->orig_argc;
 {
+#if defined(JIT_INTERFACE)
+    VALUE v = vm_send_without_block(th, ci, TOPN(ci->orig_argc));
+    CHECK_CALL_RETVAL(v);
+#else /* defined(JIT_INTERFACE) */
     ci->argc = ci->orig_argc;
     vm_search_method(ci, ci->recv = TOPN(ci->argc));
     CALL_METHOD(ci);
+#endif /* defined(JIT_INTERFACE) */
 }
 
 /**
@@ -1081,11 +1091,16 @@ invokesuper
 (...)
 (VALUE val) // inc += - (int)(ci->orig_argc + ((ci->flag & VM_CALL_ARGS_BLOCKARG) ? 1 : 0));
 {
+#if defined(JIT_INTERFACE)
+    VALUE v = vm_invokesuper(th, ci, reg_cfp);
+    CHECK_CALL_RETVAL(v);
+#else /* defined(JIT_INTERFACE) */
     ci->argc = ci->orig_argc;
     vm_caller_setup_arg_block(th, reg_cfp, ci, TRUE);
     ci->recv = GET_SELF();
     vm_search_super_method(th, GET_CFP(), ci);
     CALL_METHOD(ci);
+#endif /* defined(JIT_INTERFACE) */
 }
 
 /**
@@ -1099,14 +1114,19 @@ invokeblock
 (...)
 (VALUE val)  // inc += 1 - ci->orig_argc;
 {
+#if defined(JIT_INTERFACE)
+    VALUE v = vm_invoke_block_wrapper(th, ci);
+    CHECK_CALL_RETVAL(v);
+#else /* defined(JIT_INTERFACE) */
     ci->argc = ci->orig_argc;
     ci->blockptr = 0;
     ci->recv = GET_SELF();
     val = vm_invoke_block(th, GET_CFP(), ci);
     if (val == Qundef) {
-	RESTORE_REGS();
-	NEXT_INSN();
+       RESTORE_REGS();
+       NEXT_INSN();
     }
+#endif /* defined(JIT_INTERFACE) */
 }
 
 /**

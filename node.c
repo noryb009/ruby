@@ -12,6 +12,10 @@
 #include "ruby/ruby.h"
 #include "vm_core.h"
 
+#if defined(OMR)
+#include "rbgcsupport.h"
+#endif /* defined(OMR) */
+
 #define A(str) rb_str_cat2(buf, (str))
 #define AR(str) rb_str_concat(buf, (str))
 
@@ -942,8 +946,9 @@ rb_node_memsize(VALUE obj)
     return size;
 }
 
+/* TODO: Pass thread through node marking. ~RY */
 VALUE
-rb_gc_mark_node(NODE *obj)
+rb_gc_mark_node(rb_omr_markstate_t ms, NODE *obj)
 {
     switch (nd_type(obj)) {
       case NODE_IF:		/* 1,2,3 */
@@ -955,7 +960,7 @@ rb_gc_mark_node(NODE *obj)
       case NODE_RESBODY:
       case NODE_CLASS:
       case NODE_BLOCK_PASS:
-	rb_gc_mark(RNODE(obj)->u2.value);
+	rb_omr_mark(ms, RNODE(obj)->u2.value);
 	/* fall through */
       case NODE_BLOCK:	/* 1,3 */
       case NODE_ARRAY:
@@ -967,7 +972,7 @@ rb_gc_mark_node(NODE *obj)
       case NODE_CALL:
       case NODE_DEFS:
       case NODE_OP_ASGN1:
-	rb_gc_mark(RNODE(obj)->u1.value);
+	rb_omr_mark(ms, RNODE(obj)->u1.value);
 	/* fall through */
       case NODE_SUPER:	/* 3 */
       case NODE_FCALL:
@@ -993,7 +998,7 @@ rb_gc_mark_node(NODE *obj)
       case NODE_ALIAS:
       case NODE_VALIAS:
       case NODE_ARGSCAT:
-	rb_gc_mark(RNODE(obj)->u1.value);
+	rb_omr_mark(ms, RNODE(obj)->u1.value);
 	/* fall through */
       case NODE_GASGN:	/* 2 */
       case NODE_LASGN:
@@ -1025,20 +1030,23 @@ rb_gc_mark_node(NODE *obj)
 	return RNODE(obj)->u1.value;
 
       case NODE_SCOPE:	/* 2,3 */
+	    RUBY_MARK_OMRBUF_UNLESS_NULL(ms, obj->u1.tbl);
+
       case NODE_CDECL:
       case NODE_OPT_ARG:
-	rb_gc_mark(RNODE(obj)->u3.value);
+	rb_omr_mark(ms, RNODE(obj)->u3.value);
 	return RNODE(obj)->u2.value;
 
       case NODE_ARGS:	/* custom */
 	{
 	    struct rb_args_info *args = obj->u3.args;
 	    if (args) {
-		if (args->pre_init)    rb_gc_mark((VALUE)args->pre_init);
-		if (args->post_init)   rb_gc_mark((VALUE)args->post_init);
-		if (args->opt_args)    rb_gc_mark((VALUE)args->opt_args);
-		if (args->kw_args)     rb_gc_mark((VALUE)args->kw_args);
-		if (args->kw_rest_arg) rb_gc_mark((VALUE)args->kw_rest_arg);
+		if (args->pre_init)    rb_omr_mark(ms, (VALUE)args->pre_init);
+		if (args->post_init)   rb_omr_mark(ms, (VALUE)args->post_init);
+		if (args->opt_args)    rb_omr_mark(ms, (VALUE)args->opt_args);
+		if (args->kw_args)     rb_omr_mark(ms, (VALUE)args->kw_args);
+		if (args->kw_rest_arg) rb_omr_mark(ms, (VALUE)args->kw_rest_arg);
+		    RUBY_MARK_OMRBUF(ms, args);
 	    }
 	}
 	return RNODE(obj)->u2.value;
@@ -1063,7 +1071,8 @@ rb_gc_mark_node(NODE *obj)
       case NODE_BLOCK_ARG:
 	break;
       case NODE_ALLOCA:
-	rb_gc_mark_locations((VALUE*)RNODE(obj)->u1.value,
+	    RUBY_MARK_OMRBUF_UNLESS_NULL(ms, obj->u1.value);
+	rb_omr_mark_locations(ms, (VALUE*)RNODE(obj)->u1.value,
 			     (VALUE*)RNODE(obj)->u1.value + RNODE(obj)->u3.cnt);
 	rb_gc_mark(RNODE(obj)->u2.value);
 	break;

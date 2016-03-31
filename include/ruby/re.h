@@ -57,7 +57,8 @@ VALUE rb_reg_regsub(VALUE, VALUE, struct re_registers *, VALUE);
 long rb_reg_adjust_startpos(VALUE, VALUE, long, int);
 void rb_match_busy(VALUE);
 VALUE rb_reg_quote(VALUE);
-regex_t *rb_reg_prepare_re(VALUE re, VALUE str);
+/* TODO lpnguyen: look into removing this later, should not be needed after conservative gc changes */
+void rb_reg_prepare_re(VALUE re, VALUE str, regex_t** reg);
 int rb_reg_region_copy(struct re_registers *, const struct re_registers *);
 
 RUBY_SYMBOL_EXPORT_END

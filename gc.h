@@ -2,6 +2,17 @@
 #ifndef RUBY_GC_H
 #define RUBY_GC_H 1
 
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+/* OMR: Included because of RVALUE move into .h file */
+#include "ruby/ruby.h"
+#include "ruby/re.h"
+#include "node.h"
+#include "objectdescription.h"
+#include "vm_core.h"
+
 #if defined(__x86_64__) && !defined(_ILP32) && defined(__GNUC__) && !defined(__native_client__)
 #define SET_MACHINE_STACK_END(p) __asm__ __volatile__ ("movq\t%%rsp, %0" : "=r" (*(p)))
 #elif defined(__i386) && defined(__GNUC__) && !defined(__native_client__)
@@ -58,6 +69,10 @@ rb_gc_debug_body(const char *mode, const char *msg, int st, void *ptr)
 #endif
 
 #define RUBY_MARK_UNLESS_NULL(ptr) if(RTEST(ptr)){rb_gc_mark(ptr);}
+#define RUBY_OMR_MARK_UNLESS_NULL(ms, ptr) if(RTEST(ptr)){rb_omr_mark(ms, ptr);}
+#define RUBY_MARK_OMRBUF(ms, ptr) omr_mark_leaf_object(ms, (languageobjectptr_t)OMRBUF_HEAP_PTR_FROM_DATA_PTR(ptr))
+#define RUBY_MARK_OMRBUF_UNLESS_NULL(ms, ptr) if (NULL != ptr) {RUBY_MARK_OMRBUF(ms, ptr);}
+
 #define RUBY_FREE_UNLESS_NULL(ptr) if(ptr){ruby_xfree(ptr);(ptr)=NULL;}
 
 #if STACK_GROW_DIRECTION > 0
@@ -103,5 +118,124 @@ void rb_objspace_each_objects_without_setup(
     void *data);
 
 RUBY_SYMBOL_EXPORT_END
+
+struct rb_objspace;
+typedef struct rb_objspace rb_objspace_t;
+
+#if defined(_MSC_VER) || defined(__BORLANDC__) || defined(__CYGWIN__)
+#pragma pack(push, 1) /* magic for reducing sizeof(RVALUE): 24 -> 20 */
+#endif
+
+typedef struct RVALUE {
+    union {
+	struct {
+	    VALUE flags;		/* always 0 for freed obj */
+	    struct RVALUE *next;
+	} free;
+	struct RBasic  basic;
+	struct RObject object;
+	struct RClass  klass;
+	struct RFloat  flonum;
+	struct RString string;
+	struct RArray  array;
+	struct RRegexp regexp;
+	struct RHash   hash;
+	struct RData   data;
+	struct RTypedData   typeddata;
+	struct RStruct rstruct;
+	struct RBignum bignum;
+	struct RFile   file;
+	struct RNode   node;
+	struct RMatch  match;
+	struct RRational rational;
+	struct RComplex complex;
+	struct {
+	    struct RBasic basic;
+	    VALUE v1;
+	    VALUE v2;
+	    VALUE v3;
+	} values;
+    } as;
+#if GC_DEBUG
+    const char *file;
+    VALUE line;
+#endif
+} RVALUE;
+
+#define RANY(o) ((RVALUE*)(o))
+
+#if defined(_MSC_VER) || defined(__BORLANDC__) || defined(__CYGWIN__)
+#pragma pack(pop)
+#endif
+
+#if defined(OMR)
+
+struct RZombie {
+    struct RBasic basic;
+    VALUE next;
+    void (*dfree)(void *);
+    void *data;
+};
+
+#define RZOMBIE(o) (R_CAST(RZombie)o)
+
+struct rb_objspace;
+
+void make_zombie(rb_objspace_t *objspace, VALUE obj, void (*dfree)(void *), void *data);
+void make_io_zombie(rb_objspace_t *objspace, VALUE obj);
+void gc_finalize_deferred_register(void);
+
+int ready_to_gc(struct rb_objspace * objspace);
+
+void omr_mark_roots_vm(rb_omr_markstate_t ms);
+void omr_mark_roots_tbl(rb_omr_markstate_t ms);
+void omr_mark_roots_global_var(rb_omr_markstate_t ms);
+void omr_mark_roots_current_machine_context(rb_omr_markstate_t ms);
+void omr_mark_roots_unlinked_live_method_entries(rb_omr_markstate_t ms);
+
+void omr_mark_deferred_list(rb_omr_markstate_t ms);
+void omr_mark_deferred_list_running(rb_omr_markstate_t ms);
+void omr_increment_objspace_profile_count(void);
+void omr_mark_roots(void);
+void omr_mark_children( rb_omr_markstate_t ms, VALUE object);
+
+int omr_obj_free(void * obj);
+void adjustMallocLimits(void);
+int rb_omr_obj_free(void * obj);
+void rb_omr_adjust_malloc_limits(void);
+
+void rb_omr_free_class_or_module(VALUE obj);
+void rb_omr_free_iclass(VALUE obj);
+int rb_omr_free_data(VALUE obj);
+
+#endif /* defined(OMR) */
+
+typedef enum {
+    GPR_FLAG_NONE               = 0x000,
+    /* major reason */
+    GPR_FLAG_MAJOR_BY_NOFREE    = 0x001,
+    GPR_FLAG_MAJOR_BY_OLDGEN    = 0x002,
+    GPR_FLAG_MAJOR_BY_SHADY     = 0x004,
+    GPR_FLAG_MAJOR_BY_FORCE     = 0x008,
+#if RGENGC_ESTIMATE_OLDMALLOC
+    GPR_FLAG_MAJOR_BY_OLDMALLOC = 0x020,
+#endif
+    GPR_FLAG_MAJOR_MASK         = 0x0ff,
+
+    /* gc reason */
+    GPR_FLAG_NEWOBJ             = 0x100,
+    GPR_FLAG_MALLOC             = 0x200,
+    GPR_FLAG_METHOD             = 0x400,
+    GPR_FLAG_CAPI               = 0x800,
+    GPR_FLAG_STRESS            = 0x1000,
+
+    /* others */
+    GPR_FLAG_IMMEDIATE_SWEEP   = 0x2000,
+    GPR_FLAG_HAVE_FINALIZE     = 0x4000
+} gc_profile_record_flag;
+
+#if defined(__cplusplus)
+}
+#endif
 
 #endif /* RUBY_GC_H */

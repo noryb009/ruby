@@ -205,7 +205,7 @@ memsize_dump_arg(const void *ptr)
 static const rb_data_type_t dump_arg_data = {
     "dump_arg",
     {mark_dump_arg, free_dump_arg, memsize_dump_arg,},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_PARALLEL_FREE
 };
 
 static VALUE
@@ -1068,6 +1068,7 @@ mark_load_arg(void *ptr)
     rb_mark_tbl(p->symbols);
     rb_mark_tbl(p->data);
     rb_mark_hash(p->compat_tbl);
+
 }
 
 static void
@@ -1086,7 +1087,7 @@ memsize_load_arg(const void *ptr)
 static const rb_data_type_t load_arg_data = {
     "load_arg",
     {mark_load_arg, free_load_arg, memsize_load_arg,},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_PARALLEL_FREE
 };
 
 #define r_entry(v, arg) r_entry0((v), (arg)->data->num_entries, (arg))

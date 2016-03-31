@@ -429,6 +429,9 @@ Init_objspace_dump(VALUE rb_mObjSpace)
     sym_string = ID2SYM(rb_intern("string"));
     sym_file   = ID2SYM(rb_intern("file"));
 
+#if !defined(OMR)
+    /* In OMR, do not perform any objspace initialization */
     /* force create static IDs */
     rb_obj_gc_flags(rb_mObjSpace, 0, 0);
+#endif
 }

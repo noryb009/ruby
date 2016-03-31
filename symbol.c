@@ -111,8 +111,17 @@ static struct symbols {
     ID last_id;
     st_table *str_sym;
     VALUE ids;
+#if !defined(OMR)
     VALUE dsymbol_fstr_hash;
+#endif /* !defined(OMR) */
 } global_symbols = {tNEXT_ID-1};
+
+#if defined(OMR)
+void* rb_global_symbols(void)
+{
+    return (void*)&global_symbols;
+}
+#endif /* OMR */
 
 static const struct st_hash_type symhash = {
     rb_str_hash_cmp,
@@ -122,10 +131,12 @@ static const struct st_hash_type symhash = {
 void
 Init_sym(void)
 {
+#if !defined(OMR)
     VALUE dsym_fstrs = rb_ident_hash_new();
     global_symbols.dsymbol_fstr_hash = dsym_fstrs;
     rb_gc_register_mark_object(dsym_fstrs);
     rb_obj_hide(dsym_fstrs);
+#endif
 
     global_symbols.str_sym = st_init_table_with_size(&symhash, 1000);
     global_symbols.ids = rb_ary_tmp_new(0);
@@ -519,7 +530,10 @@ dsymbol_alloc(const VALUE klass, const VALUE str, rb_encoding * const enc, const
     RSYMBOL(dsym)->hashval = (st_index_t)RSHIFT(hashval, 1);
 
     register_sym(str, dsym);
+
+#if !defined(OMR)
     rb_hash_aset(global_symbols.dsymbol_fstr_hash, str, Qtrue);
+#endif /* !defined(OMR) */
 
     if (RUBY_DTRACE_SYMBOL_CREATE_ENABLED()) {
 	RUBY_DTRACE_SYMBOL_CREATE(RSTRING_PTR(RSYMBOL(dsym)->fstr), rb_sourcefile(), rb_sourceline());
@@ -532,12 +546,20 @@ static inline VALUE
 dsymbol_check(const VALUE sym)
 {
     if (UNLIKELY(rb_objspace_garbage_object_p(sym))) {
+#if defined(OMR)
+        /* You should never encounter a dynamic symbol that has been collected.
+         * We cannot safely access garbage on the heap. Why does Ruby assume it
+         * can? */
+        assert(0);
+        return (VALUE)0;
+#else /* defined(OMR) */
 	const VALUE fstr = RSYMBOL(sym)->fstr;
 	const ID type = RSYMBOL(sym)->id & ID_SCOPE_MASK;
 	RSYMBOL(sym)->fstr = 0;
 
 	unregister_sym(fstr, sym);
 	return dsymbol_alloc(rb_cSymbol, fstr, rb_enc_get(fstr), type);
+#endif /* else defined(OMR) */
     }
     else {
 	return sym;
@@ -670,7 +692,9 @@ rb_gc_free_dsymbol(VALUE sym)
     if (str) {
 	RSYMBOL(sym)->fstr = 0;
 	unregister_sym(str, sym);
+#if !defined(OMR)
 	rb_hash_delete_entry(global_symbols.dsymbol_fstr_hash, str);
+#endif /* !defined(OMR) */
     }
 }
 
@@ -747,7 +771,9 @@ rb_sym2id(VALUE sym)
 	    RSYMBOL(sym)->id = id |= num;
 	    /* make it permanent object */
 	    set_id_entry(num >>= ID_SCOPE_SHIFT, fstr, sym);
+#if !defined(OMR)
 	    rb_hash_delete_entry(global_symbols.dsymbol_fstr_hash, fstr);
+#endif /* !defined(OMR) */
 	}
     }
     else {

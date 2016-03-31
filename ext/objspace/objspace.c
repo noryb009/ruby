@@ -59,6 +59,7 @@ total_i(void *vstart, void *vend, size_t stride, void *ptr)
 	      case T_ICLASS:
 	      case T_NODE:
 	      case T_ZOMBIE:
+	      case T_OMRBUF:
 		continue;
 	      case T_CLASS:
 		if (FL_TEST(v, FL_SINGLETON))
@@ -132,7 +133,7 @@ cos_i(void *vstart, void *vend, size_t stride, void *data)
 
     for (;v != (VALUE)vend; v += stride) {
 	if (RBASIC(v)->flags) {
-	    counts[BUILTIN_TYPE(v)] += rb_obj_memsize_of(v);
+	    counts[ruby_type_to_index(BUILTIN_TYPE(v))] += rb_obj_memsize_of(v);
 	}
     }
     return 0;
@@ -168,6 +169,7 @@ type2sym(enum ruby_value_type i)
 	CASE_TYPE(T_UNDEF);
 	CASE_TYPE(T_NODE);
 	CASE_TYPE(T_ICLASS);
+	CASE_TYPE(T_OMRBUF);
 	CASE_TYPE(T_ZOMBIE);
 #undef CASE_TYPE
       default: rb_bug("type2sym: unknown type (%d)", i);
@@ -201,7 +203,7 @@ type2sym(enum ruby_value_type i)
 static VALUE
 count_objects_size(int argc, VALUE *argv, VALUE os)
 {
-    size_t counts[T_MASK+1];
+    size_t counts[RUBY_TYPE_COUNT + 1];
     size_t total = 0;
     enum ruby_value_type i;
     VALUE hash;
@@ -211,7 +213,7 @@ count_objects_size(int argc, VALUE *argv, VALUE os)
             rb_raise(rb_eTypeError, "non-hash given");
     }
 
-    for (i = 0; i <= T_MASK; i++) {
+    for (i = 0; i <= RUBY_TYPE_COUNT; i++) {
 	counts[i] = 0;
     }
 
@@ -224,9 +226,9 @@ count_objects_size(int argc, VALUE *argv, VALUE os)
         st_foreach(RHASH_TBL(hash), set_zero_i, hash);
     }
 
-    for (i = 0; i <= T_MASK; i++) {
+    for (i = 0; i <= RUBY_TYPE_COUNT; i++) {
 	if (counts[i]) {
-	    VALUE type = type2sym(i);
+	    VALUE type = type2sym(ruby_index_to_type(i));
 	    total += counts[i];
 	    rb_hash_aset(hash, type, SIZET2NUM(counts[i]));
 	}

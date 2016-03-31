@@ -3237,7 +3237,11 @@ setup_args(rb_iseq_t *iseq, LINK_ANCHOR *args, NODE *argn, unsigned int *flag, r
     if (nsplat > 1) {
 	int i;
 	for (i=1; i<nsplat; i++) {
-	    ADD_INSN(args_splat, nd_line(args), concatarray);
+	    /* This looks like a bug in that nd_line is being called on a non-node and this is
+	     * the only place that occurs. Further it does not seem like there could be a valid
+	     * line number in the args value passed in
+	     */
+	    ADD_INSN(args_splat, nd_line(argn), concatarray);
 	}
     }
 

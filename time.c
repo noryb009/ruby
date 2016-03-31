@@ -13,6 +13,8 @@
 #include <sys/types.h>
 #include <time.h>
 #include <errno.h>
+#include "rbgcsupport.h"
+#include "vm_core.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1780,11 +1782,12 @@ static void
 time_mark(void *ptr)
 {
     struct time_object *tobj = ptr;
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
     if (!FIXWV_P(tobj->timew))
-        rb_gc_mark(w2v(tobj->timew));
-    rb_gc_mark(tobj->vtm.year);
-    rb_gc_mark(tobj->vtm.subsecx);
-    rb_gc_mark(tobj->vtm.utc_offset);
+        rb_omr_mark(ms, w2v(tobj->timew));
+    rb_omr_mark(ms, tobj->vtm.year);
+    rb_omr_mark(ms, tobj->vtm.subsecx);
+    rb_omr_mark(ms, tobj->vtm.utc_offset);
 }
 
 static size_t
@@ -1795,8 +1798,12 @@ time_memsize(const void *tobj)
 
 static const rb_data_type_t time_data_type = {
     "time",
-    {time_mark, RUBY_TYPED_DEFAULT_FREE, time_memsize,},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    {
+	time_mark,
+	0,
+	time_memsize,
+    },
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 static VALUE

@@ -70,7 +70,18 @@ typedef struct rb_method_cfunc_struct {
 
 typedef struct rb_method_attr_struct {
     ID id;
+#if defined(OMR)
+    /* OMRTODO: Removed the "const" keyword as this was preventing the file from being compiled
+     * under C++ (const used in a structure used in a union - copy constructor required).  The
+     * field itself was being written to under initialization and due to being GCable is
+     * likely to be even less "const" than it currently is.  There isn't any real perceived
+     * benefit from having it declared as such.  Removing for now.
+     */
+    VALUE location;
+#else /* OMR */
     const VALUE location;
+#endif /* OMR */
+
 } rb_method_attr_t;
 
 typedef struct rb_iseq_struct rb_iseq_t;
@@ -136,6 +147,8 @@ VALUE rb_method_entry_location(rb_method_entry_t *me);
 VALUE rb_mod_method_location(VALUE mod, ID id);
 VALUE rb_obj_method_location(VALUE obj, ID id);
 
+/* TODO: Consolidate mark method entry functions if possible. ~RY */
+void rb_omr_mark_method_entry(rb_omr_markstate_t ms, const rb_method_entry_t *me);
 void rb_mark_method_entry(const rb_method_entry_t *me);
 void rb_free_method_entry(rb_method_entry_t *me);
 void rb_sweep_method_entry(void *vm);

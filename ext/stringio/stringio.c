@@ -36,7 +36,7 @@ static void strio_init(int, VALUE *, struct StringIO *, VALUE);
 static struct StringIO *
 strio_alloc(void)
 {
-    struct StringIO *ptr = ALLOC(struct StringIO);
+    struct StringIO *ptr = alloc_omr_buffer(sizeof(struct StringIO));
     ptr->string = Qnil;
     ptr->pos = 0;
     ptr->lineno = 0;
@@ -75,10 +75,10 @@ static const rb_data_type_t strio_data_type = {
     "strio",
     {
 	strio_mark,
-	strio_free,
+	0,
 	strio_memsize,
     },
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 #define check_strio(self) ((struct StringIO*)rb_check_typeddata((self), &strio_data_type))
@@ -456,9 +456,6 @@ strio_copy(VALUE copy, VALUE orig)
     orig = rb_convert_type(orig, T_DATA, "StringIO", "to_strio");
     if (copy == orig) return copy;
     ptr = StringIO(orig);
-    if (check_strio(copy)) {
-	strio_free(DATA_PTR(copy));
-    }
     DATA_PTR(copy) = ptr;
     OBJ_INFECT(copy, orig);
     RBASIC(copy)->flags &= ~STRIO_READWRITE;

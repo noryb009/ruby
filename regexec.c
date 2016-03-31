@@ -227,13 +227,12 @@ onig_region_resize(OnigRegion* region, int n)
     n = ONIG_NREGION;
 
   if (region->allocated == 0) {
-    region->beg = (OnigPosition* )xmalloc(n * sizeof(OnigPosition));
+	region->beg = (OnigPosition* )alloc_omr_buffer(n * sizeof(OnigPosition));
     if (region->beg == 0)
       return ONIGERR_MEMORY;
 
-    region->end = (OnigPosition* )xmalloc(n * sizeof(OnigPosition));
+    region->end = (OnigPosition* )alloc_omr_buffer(n * sizeof(OnigPosition));
     if (region->end == 0) {
-      xfree(region->beg);
       return ONIGERR_MEMORY;
     }
 
@@ -243,17 +242,13 @@ onig_region_resize(OnigRegion* region, int n)
     OnigPosition *tmp;
 
     region->allocated = 0;
-    tmp = (OnigPosition* )xrealloc(region->beg, n * sizeof(OnigPosition));
+	tmp = (OnigPosition* )realloc_omr_buffer(region->beg, n * sizeof(OnigPosition));
     if (tmp == 0) {
-      xfree(region->beg);
-      xfree(region->end);
       return ONIGERR_MEMORY;
     }
     region->beg = tmp;
-    tmp = (OnigPosition* )xrealloc(region->end, n * sizeof(OnigPosition));
+    tmp = (OnigPosition* )realloc_omr_buffer(region->end, n * sizeof(OnigPosition));
     if (tmp == 0) {
-      xfree(region->beg);
-      xfree(region->end);
       return ONIGERR_MEMORY;
     }
     region->end = tmp;
@@ -3518,12 +3513,16 @@ bm_search_ic(regex_t* reg, const UChar* target, const UChar* target_end,
 
 static int
 set_bm_backward_skip(UChar* s, UChar* end, OnigEncoding enc ARG_UNUSED,
-		     int** skip)
+		     int** skip, regex_t* reg)
 {
   int i, len;
 
   if (IS_NULL(*skip)) {
-    *skip = (int* )xmalloc(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+	if (reg->heap_allocated) {
+      *skip = (int* )alloc_omr_buffer(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+	} else {
+      *skip = (int* )xmalloc(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+	}
     if (IS_NULL(*skip)) return ONIGERR_MEMORY;
   }
 
@@ -3791,7 +3790,7 @@ forward_search_range(regex_t* reg, const UChar* str, const UChar* end, UChar* s,
 }
 
 static int set_bm_backward_skip P_((UChar* s, UChar* end, OnigEncoding enc,
-				    int** skip));
+				    int** skip, regex_t* reg));
 
 #define BM_BACKWARD_SEARCH_LENGTH_THRESHOLD   100
 
@@ -3829,7 +3828,7 @@ backward_search_range(regex_t* reg, const UChar* str, const UChar* end,
 	goto exact_method;
 
       r = set_bm_backward_skip(reg->exact, reg->exact_end, reg->enc,
-			       &(reg->int_map_backward));
+			       &(reg->int_map_backward), reg);
       if (r) return r;
     }
     p = bm_search_backward(reg, reg->exact, reg->exact_end, range, adjrange,

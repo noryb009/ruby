@@ -154,14 +154,18 @@ bitset_on_num(BitSetRef bs)
 #endif
 
 extern int
-onig_bbuf_init(BBuf* buf, OnigDistance size)
+onig_bbuf_init(BBuf* buf, OnigDistance size, int heap_allocated)
 {
   if (size <= 0) {
     size   = 0;
     buf->p = NULL;
   }
   else {
-    buf->p = (UChar* )xmalloc(size);
+    if (heap_allocated) {
+        buf->p = (UChar* )alloc_omr_buffer(size);
+    } else {
+        buf->p = (UChar* )xmalloc(size);
+    }
     if (IS_NULL(buf->p)) return(ONIGERR_MEMORY);
   }
 
@@ -673,7 +677,11 @@ entry_repeat_range(regex_t* reg, int id, int lower, int upper)
   OnigRepeatRange* p;
 
   if (reg->repeat_range_alloc == 0) {
-    p = (OnigRepeatRange* )xmalloc(sizeof(OnigRepeatRange) * REPEAT_RANGE_ALLOC);
+    if (reg->heap_allocated) {
+      p = (OnigRepeatRange* )alloc_omr_buffer(sizeof(OnigRepeatRange) * REPEAT_RANGE_ALLOC);
+    } else {
+      p = (OnigRepeatRange* )xmalloc(sizeof(OnigRepeatRange) * REPEAT_RANGE_ALLOC);
+    }
     CHECK_NULL_RETURN_MEMERR(p);
     reg->repeat_range = p;
     reg->repeat_range_alloc = REPEAT_RANGE_ALLOC;
@@ -681,8 +689,11 @@ entry_repeat_range(regex_t* reg, int id, int lower, int upper)
   else if (reg->repeat_range_alloc <= id) {
     int n;
     n = reg->repeat_range_alloc + REPEAT_RANGE_ALLOC;
-    p = (OnigRepeatRange* )xrealloc(reg->repeat_range,
-                                    sizeof(OnigRepeatRange) * n);
+    if (reg->heap_allocated) {
+      p = (OnigRepeatRange* )realloc_omr_buffer(reg->repeat_range, sizeof(OnigRepeatRange) * n);
+    } else {
+      p = (OnigRepeatRange* )xrealloc(reg->repeat_range, sizeof(OnigRepeatRange) * n);
+    }
     CHECK_NULL_RETURN_MEMERR(p);
     reg->repeat_range = p;
     reg->repeat_range_alloc = n;
@@ -2072,7 +2083,7 @@ unset_addr_list_fix(UnsetAddrList* uslist, regex_t* reg)
     addr = en->call_addr;
     offset = uslist->us[i].offset;
 
-    BBUF_WRITE(reg, offset, &addr, SIZE_ABSADDR);
+    OMR_BBUF_WRITE(reg, offset, &addr, SIZE_ABSADDR, reg->heap_allocated);
   }
   return 0;
 }
@@ -4282,7 +4293,11 @@ set_bm_skip(UChar* s, UChar* end, regex_t* reg,
   }
   else {
     if (IS_NULL(*int_skip)) {
-      *int_skip = (int* )xmalloc(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+      if (reg->heap_allocated) {
+        *int_skip = (int* )alloc_omr_buffer(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+      } else {
+        *int_skip = (int* )xmalloc(sizeof(int) * ONIG_CHAR_TABLE_SIZE);
+      }
       if (IS_NULL(*int_skip)) return ONIGERR_MEMORY;
     }
     for (i = 0; i < ONIG_CHAR_TABLE_SIZE; i++) (*int_skip)[i] = (int )(len + 1);
@@ -5286,7 +5301,11 @@ set_optimize_exact_info(regex_t* reg, OptExactInfo* e)
 
   if (e->len == 0) return 0;
 
-  reg->exact = (UChar* )xmalloc(e->len);
+  if (reg->heap_allocated) {
+    reg->exact = (UChar* )alloc_omr_buffer(e->len);
+  } else {
+    reg->exact = (UChar* )xmalloc(e->len);
+  }
   CHECK_NULL_RETURN_MEMERR(reg->exact);
   xmemcpy(reg->exact, e->s, e->len);
   reg->exact_end = reg->exact + e->len;
@@ -5609,7 +5628,7 @@ onig_free_body(regex_t* reg)
 extern void
 onig_free(regex_t* reg)
 {
-  if (IS_NOT_NULL(reg)) {
+  if (IS_NOT_NULL(reg) && !reg->heap_allocated) {
     onig_free_body(reg);
     xfree(reg);
   }
@@ -5721,7 +5740,7 @@ onig_compile(regex_t* reg, const UChar* pattern, const UChar* pattern_end,
   if (reg->alloc == 0) {
     init_size = (pattern_end - pattern) * 2;
     if (init_size <= 0) init_size = COMPILE_INIT_SIZE;
-    r = BBUF_INIT(reg, init_size);
+    r = OMR_BBUF_INIT(reg, init_size, reg->heap_allocated);
     if (r != 0) goto end;
   }
   else
@@ -5960,6 +5979,10 @@ onig_reg_init(regex_t* reg, OnigOptionType option,
   (reg)->name_table       = (void* )NULL;
 
   (reg)->case_fold_flag   = case_fold_flag;
+
+#if defined(OMR)
+  (reg)->heap_allocated = FALSE;
+#endif /* OMR */
   return 0;
 }
 
@@ -5984,16 +6007,17 @@ onig_new(regex_t** reg, const UChar* pattern, const UChar* pattern_end,
 {
   int r;
 
-  *reg = (regex_t* )xmalloc(sizeof(regex_t));
+  *reg = (regex_t* )zalloc_omr_buffer(sizeof(regex_t));
   if (IS_NULL(*reg)) return ONIGERR_MEMORY;
 
   r = onig_reg_init(*reg, option, ONIGENC_CASE_FOLD_DEFAULT, enc, syntax);
   if (r) goto err;
 
+  (*reg)->heap_allocated = TRUE;
+
   r = onig_compile(*reg, pattern, pattern_end, einfo, NULL, 0);
   if (r) {
   err:
-    onig_free(*reg);
     *reg = NULL;
   }
   return r;

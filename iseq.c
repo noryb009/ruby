@@ -25,6 +25,11 @@
 #include "insns.inc"
 #include "insns_info.inc"
 
+#if defined(OMR)
+#include "rbgcsupport.h"
+#include "rbomrprofiler.h"
+#endif /* defined(OMR) */
+
 #define ISEQ_MAJOR_VERSION 2
 #define ISEQ_MINOR_VERSION 2
 
@@ -186,7 +191,7 @@ static const rb_data_type_t iseq_data_type = {
 	iseq_memsize,
     },              /* functions */
     0, 0,
-    RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_PROMOTED1 /* start from age == 2 */ | RUBY_TYPED_WB_PROTECTED
+    RUBY_TYPED_FREE_IMMEDIATELY | RUBY_TYPED_PROMOTED1 /* start from age == 2 */ | RUBY_TYPED_WB_PROTECTED | RDATA_PARALLEL_FREE
 };
 
 static VALUE
@@ -453,6 +458,11 @@ rb_iseq_new_with_opt(NODE *node, VALUE name, VALUE path, VALUE absolute_path,
 
     rb_iseq_compile_node(self, node);
     cleanup_iseq_build(iseq);
+#if defined(OMR)
+    if (ISEQ_TYPE_EVAL != iseq->type) {
+        rb_omr_insertISeqInMethodDictionary(GET_VM(), iseq);
+    }
+#endif /* defined(OMR) */
     return self;
 }
 
@@ -550,6 +560,10 @@ iseq_load(VALUE self, VALUE data, VALUE parent, VALUE opt)
     rb_iseq_build_from_ary(iseq, misc, locals, params, exception, body);
 
     cleanup_iseq_build(iseq);
+
+#if defined(OMR)
+    rb_omr_insertISeqInMethodDictionary(GET_VM(), iseq);
+#endif /* defined(OMR) */
     return iseqval;
 }
 
@@ -1984,6 +1998,9 @@ rb_iseq_clone(VALUE iseqval, VALUE newcbase)
 	RB_OBJ_WRITE(iseq1->self, &iseq1->klass, newcbase);
     }
 
+#if defined(OMR)
+    rb_omr_insertISeqInMethodDictionary(GET_VM(), iseq1);
+#endif /* defined(OMR) */
     return newiseq;
 }
 
@@ -2172,6 +2189,9 @@ rb_iseq_build_for_ruby2cext(
 
     set_relation(iseq, 0);
 
+#if defined(OMR)
+    rb_omr_insertISeqInMethodDictionary(GET_VM(), iseq);
+#endif /* defined(OMR) */
     return iseqval;
 }
 

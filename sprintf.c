@@ -56,7 +56,7 @@ sign_bits(int base, const char *p)
 #define CHECK(l) do {\
     int cr = ENC_CODERANGE(result);\
     while (blen + (l) >= bsiz) {\
-	bsiz*=2;\
+	bsiz= bsiz*2 + 1;\
     }\
     rb_str_resize(result, bsiz);\
     ENC_CODERANGE_SET(result, cr);\

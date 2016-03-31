@@ -255,7 +255,6 @@ void
 rb_obj_copy_ivar(VALUE dest, VALUE obj)
 {
     if (!(RBASIC(dest)->flags & ROBJECT_EMBED) && ROBJECT_IVPTR(dest)) {
-	xfree(ROBJECT_IVPTR(dest));
 	ROBJECT(dest)->as.heap.ivptr = 0;
 	ROBJECT(dest)->as.heap.numiv = 0;
 	ROBJECT(dest)->as.heap.iv_index_tbl = 0;
@@ -268,7 +267,7 @@ rb_obj_copy_ivar(VALUE dest, VALUE obj)
 	long len = ROBJECT(obj)->as.heap.numiv;
 	VALUE *ptr = 0;
 	if (len > 0) {
-	    ptr = ALLOC_N(VALUE, len);
+	    ptr = alloc_omr_buffer(sizeof(VALUE) * len);
 	    MEMCPY(ptr, ROBJECT(obj)->as.heap.ivptr, VALUE, len);
 	}
 	ROBJECT(dest)->as.heap.ivptr = ptr;
@@ -3263,7 +3262,16 @@ rb_f_hash(VALUE obj, VALUE arg)
 void
 Init_Object(void)
 {
+#if defined(OMR)
+    VALUE keep_rb_cObject_alive = Qnil;
+#endif /* OMR */
     Init_class_hierarchy();
+#if defined(OMR)
+    /* rb_cObject is set by Init_class_hierarchy, however it is not until later in this method
+       that the appropriate references are set to keep it alive.  If we don't keep a ref on the
+       stack until this occurs we fail when running with GC stress enabled */
+    keep_rb_cObject_alive = rb_cObject;
+#endif /* OMR */
 
 #if 0
     // teach RDoc about these classes
@@ -3465,7 +3473,12 @@ Init_Object(void)
      */
     rb_define_global_const("TRUE", Qtrue);
 
+#if defined(OMR)
+    /* see definition of keep_rb_cObject_alive for explanation of why we need this change */
+    rb_cFalseClass = rb_define_class("FalseClass", keep_rb_cObject_alive);
+#else /* OMR */
     rb_cFalseClass = rb_define_class("FalseClass", rb_cObject);
+#endif /* OMR */
     rb_define_method(rb_cFalseClass, "to_s", false_to_s, 0);
     rb_define_alias(rb_cFalseClass, "inspect", "to_s");
     rb_define_method(rb_cFalseClass, "&", false_and, 1);

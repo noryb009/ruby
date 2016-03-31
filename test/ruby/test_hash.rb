@@ -215,6 +215,7 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_AREF_fstring_key
+    skip "OMRTODO: Test disabled. Most of gc stat symbols don't make sense in OMR GC. [gc.c: setup_gc_stat_symbols()]"
     h = {"abc" => 1}
     before = GC.stat(:total_allocated_objects)
     5.times{ h["abc"] }

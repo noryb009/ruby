@@ -27,6 +27,10 @@
 #include "vm_core.h"
 #include "eval_intern.h"
 
+ #if defined(OMR)
+ #include "rbgcsupport.h"
+ #endif
+
 /* (1) trace mechanisms */
 
 typedef struct rb_event_hook_struct {
@@ -46,12 +50,12 @@ static int ruby_event_flag_count[MAX_EVENT_NUM] = {0};
 /* called from vm.c */
 
 void
-rb_vm_trace_mark_event_hooks(rb_hook_list_t *hooks)
+rb_vm_trace_mark_event_hooks( rb_omr_markstate_t ms, rb_hook_list_t *hooks)
 {
     rb_event_hook_t *hook = hooks->hooks;
 
     while (hook) {
-	rb_gc_mark(hook->data);
+	rb_omr_mark(ms, hook->data);
 	hook = hook->next;
     }
 }
@@ -657,8 +661,9 @@ tp_mark(void *ptr)
 {
     if (ptr) {
 	rb_tp_t *tp = (rb_tp_t *)ptr;
-	rb_gc_mark(tp->proc);
-	if (tp->target_th) rb_gc_mark(tp->target_th->self);
+	rb_omr_markstate_t ms = rb_omr_get_markstate();
+	rb_omr_mark(ms, tp->proc);
+	if (tp->target_th) rb_omr_mark(ms, tp->target_th->self);
     }
 }
 

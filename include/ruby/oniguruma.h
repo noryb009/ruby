@@ -701,6 +701,12 @@ typedef struct re_pattern_buffer {
 
   /* regex_t link chain */
   struct re_pattern_buffer* chain;  /* escape compile-conflict */
+
+  /* TRUE or FALSE. Indicates whether or not this structure is heap allocated.
+   * It should be set to TRUE only when heap buffers are enabled, and this structure
+   * is part of a T_REGEX.
+   */
+  int heap_allocated;
 } OnigRegexType;
 
 typedef OnigRegexType*  OnigRegex;

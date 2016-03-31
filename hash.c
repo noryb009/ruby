@@ -378,7 +378,7 @@ rb_hash_dup(VALUE hash)
 {
     VALUE ret = rb_hash_dup_empty(hash);
     if (!RHASH_EMPTY_P(hash))
-	RHASH(ret)->ntbl = st_copy(RHASH(hash)->ntbl);
+	RHASH(ret)->ntbl = st_copy(RHASH(hash)->ntbl); /* TODO: Buffer write barrier. ~RY */
     return ret;
 }
 
@@ -392,7 +392,7 @@ static struct st_table *
 hash_tbl(VALUE hash)
 {
     if (!RHASH(hash)->ntbl) {
-        RHASH(hash)->ntbl = st_init_table(&objhash);
+	    RHASH(hash)->ntbl = st_init_table_heapalloc(&objhash); /* TODO: Buffer write barrier. ~RY */
     }
     return RHASH(hash)->ntbl;
 }
@@ -582,7 +582,7 @@ rb_hash_s_create(int argc, VALUE *argv, VALUE klass)
 	if (!NIL_P(tmp)) {
 	    hash = hash_alloc(klass);
 	    if (RHASH(tmp)->ntbl) {
-		RHASH(hash)->ntbl = st_copy(RHASH(tmp)->ntbl);
+		RHASH(hash)->ntbl = st_copy(RHASH(tmp)->ntbl); /* TODO: Buffer write barrier. ~RY */
 	    }
 	    return hash;
 	}
@@ -712,7 +712,7 @@ rb_hash_rehash(VALUE hash)
     if (!RHASH(hash)->ntbl)
         return hash;
     tmp = hash_alloc(0);
-    tbl = st_init_table_with_size(RHASH(hash)->ntbl->type, RHASH(hash)->ntbl->num_entries);
+	tbl = st_init_table_with_size_heapalloc(RHASH(hash)->ntbl->type, RHASH(hash)->ntbl->num_entries);
     RHASH(tmp)->ntbl = tbl;
 
     rb_hash_foreach(hash, rb_hash_rehash_i, (VALUE)tbl);
@@ -1501,7 +1501,7 @@ rb_hash_initialize_copy(VALUE hash, VALUE hash2)
     ntbl = RHASH(hash)->ntbl;
     if (RHASH(hash2)->ntbl) {
 	if (ntbl) st_free_table(ntbl);
-        RHASH(hash)->ntbl = st_copy(RHASH(hash2)->ntbl);
+	RHASH(hash)->ntbl = st_copy(RHASH(hash2)->ntbl); /* TODO: Buffer write barrier. ~RY */
 	if (RHASH(hash)->ntbl->num_entries)
 	    rb_hash_rehash(hash);
     }
@@ -1818,7 +1818,7 @@ rb_hash_to_h(VALUE hash)
     if (rb_obj_class(hash) != rb_cHash) {
 	VALUE ret = rb_hash_new();
 	if (!RHASH_EMPTY_P(hash))
-	    RHASH(ret)->ntbl = st_copy(RHASH(hash)->ntbl);
+	    RHASH(ret)->ntbl = st_copy(RHASH(hash)->ntbl); /* TODO: Buffer write barrier. ~RY */
 	if (FL_TEST(hash, HASH_PROC_DEFAULT)) {
 	    FL_SET(ret, HASH_PROC_DEFAULT);
 	}

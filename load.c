@@ -2,6 +2,7 @@
  * load methods from eval.c
  */
 
+#include "ruby.h"
 #include "internal.h"
 #include "ruby/util.h"
 #include "dln.h"
@@ -202,8 +203,17 @@ features_index_add_single(VALUE short_feature, VALUE offset)
 	VALUE feature_indexes[2];
 	feature_indexes[0] = this_feature_index;
 	feature_indexes[1] = offset;
+#if defined(OMR)
+	/**
+	 * Using a regular object allocation for this because ruby arrays might be
+	 * heap-allocated under OMR so we need to be able to mark the ruby array.  We'll
+	 * keep features_indexes as part of root-scanning
+	 */
+	this_feature_index = rb_ary_new();
+#else /* OMR */
 	this_feature_index = (VALUE)xcalloc(1, sizeof(struct RArray));
 	RBASIC(this_feature_index)->flags = T_ARRAY; /* fake VALUE, do not mark/sweep */
+#endif /* OMR */
 	rb_ary_cat(this_feature_index, feature_indexes, numberof(feature_indexes));
 	st_insert(features_index, (st_data_t)short_feature_cstr, (st_data_t)this_feature_index);
     }
@@ -263,11 +273,16 @@ features_index_add(VALUE feature, VALUE offset)
 static int
 loaded_features_index_clear_i(st_data_t key, st_data_t val, st_data_t arg)
 {
+#if !defined(OMR)
     VALUE obj = (VALUE)val;
+    /* values are either Ruby fixnums or ruby-heap arrays. clear the
+     * reference without freeing. */
     if (!SPECIAL_CONST_P(obj)) {
 	rb_ary_free(obj);
 	xfree((void *)obj);
     }
+#endif /* defined(OMR) */
+    /* key is a c string. Must be freed, even in OMR. */
     xfree((char *)key);
     return ST_DELETE;
 }

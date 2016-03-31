@@ -78,6 +78,13 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
     DECL_SC_REG(rb_control_frame_t *, cfp, "15");
 #define USE_MACHINE_REGS 1
 
+#elif defined(__GNUC__) && defined(__powerpc64__)
+    DECL_SC_REG(VALUE *, sp, "27");
+    DECL_SC_REG(VALUE *, pc, "28");
+    DECL_SC_REG(rb_control_frame_t *, cfp, "29");
+#define USE_MACHINE_REGS 1
+#define USE_MACHINE_SP_REG 1
+
 #else
     register rb_control_frame_t *reg_cfp;
     VALUE *reg_pc;
@@ -98,6 +105,33 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 #define GET_PC() (reg_pc)
 #undef  SET_PC
 #define SET_PC(x) (reg_cfp->pc = REG_PC = (x))
+
+#if USE_MACHINE_SP_REG
+#undef  RESTORE_REGS
+#define RESTORE_REGS() \
+{ \
+  REG_CFP = th->cfp; \
+  reg_pc  = reg_cfp->pc; \
+  reg_sp  = reg_cfp->sp; \
+}
+#undef  REG_SP
+#define REG_SP reg_sp
+#undef  GET_SP
+#define GET_SP (reg_sp)
+#undef  SET_SP
+#define SET_SP(x) (reg_cfp->sp = (reg_sp = (x)))
+#undef  INC_SP
+#define INC_SP(x) (reg_cfp->sp = (reg_sp += (x)))
+#undef  DEC_SP
+#define DEC_SP(x) (reg_cfp->sp = (reg_sp -= (x)))
+#undef  SET_SV
+#define SET_SV(x) (*reg_sp = (x))
+#undef  TOPN
+#define TOPN(n) (*(reg_sp-(n)-1))
+#undef  STACK_ADDR_FROM_TOP
+#define STACK_ADDR_FROM_TOP(n) (reg_sp-(n))
+#endif  /*USE_MACHINE_SP_REG*/
+
 #endif
 
 #if OPT_TOKEN_THREADED_CODE || OPT_DIRECT_THREADED_CODE
@@ -108,6 +142,9 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 #endif
     reg_cfp = th->cfp;
     reg_pc = reg_cfp->pc;
+#if USE_MACHINE_SP_REG
+    reg_sp = reg_cfp->sp;
+#endif /*USE_MACHINE_SP_REG*/
 
 #if OPT_STACK_CACHING
     reg_a = initial;

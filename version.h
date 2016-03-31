@@ -8,6 +8,11 @@
 
 #include "ruby/version.h"
 
+#if defined(OMR)
+#include "omrglue/rubyversionstrings.h"
+#include "omrversionstrings.h"
+#endif /* OMR */
+
 #if !defined RUBY_LIB_VERSION && defined RUBY_LIB_VERSION_STYLE
 # if RUBY_LIB_VERSION_STYLE == 3
 #   define RUBY_LIB_VERSION STRINGIZE(RUBY_API_VERSION_MAJOR)"."STRINGIZE(RUBY_API_VERSION_MINOR)"."STRINGIZE(RUBY_API_VERSION_TEENY)
@@ -42,6 +47,7 @@
 # define RUBY_DESCRIPTION	    \
     "ruby "RUBY_VERSION		    \
     RUBY_PATCHLEVEL_STR		    \
+    " (Eclipse OMR Preview r1)"     \
     " ("RUBY_RELEASE_DATE	    \
     RUBY_REVISION_STR") "	    \
     "["RUBY_PLATFORM"]"
@@ -50,3 +56,14 @@
     STRINGIZE(RUBY_BIRTH_YEAR)"-"   \
     STRINGIZE(RUBY_RELEASE_YEAR)" " \
     RUBY_AUTHOR
+
+#if defined(OMR)
+#define OMR_DESCRIPTION \
+    "OMR "RUBY_BUILD_ID
+#define RUBY_LEVEL \
+    "RUBY "RUBY_GIT_COMMIT
+#define OMR_LEVEL \
+    "OMR "OMR_VERSION_STRING
+#define JIT_LEVEL \
+    "JIT "OMR_JIT_VERSION_STRING
+#endif /* OMR */

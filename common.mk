@@ -5,7 +5,8 @@ dll: $(LIBRUBY_SO)
 .SUFFIXES: .inc .h .c .y .i .$(DTRACE_EXT)
 
 # V=0 quiet, V=1 verbose.  other values don't work.
-V = 0
+#V = 0
+V = 1
 Q1 = $(V:1=)
 Q = $(Q1:0=@)
 ECHO0 = $(ECHO1:0=echo)
@@ -40,6 +41,35 @@ DLDOBJS	      = $(INITOBJS)
 EXTSOLIBS     =
 MINIOBJS      = $(ARCHMINIOBJS) miniinit.$(OBJEXT) miniprelude.$(OBJEXT)
 ENC_MK        = enc.mk
+
+# OMR Glue Object Files
+ifdef WITH_OMR
+OMRGLUE_OBJS= \
+			$(OMRGLUEDIR)/ObjectModel.$(OBJEXT) \
+			$(OMRGLUEDIR)/FrequentObjectsStats.$(OBJEXT) \
+			$(OMRGLUEDIR)/CompactSchemeFixupObject.$(OBJEXT) \
+			$(OMRGLUEDIR)/CollectorLanguageInterfaceImpl.$(OBJEXT) \
+			$(OMRGLUEDIR)/ConfigurationLanguageInterfaceImpl.$(OBJEXT) \
+			$(OMRGLUEDIR)/EnvironmentLanguageInterfaceImpl.$(OBJEXT) \
+			$(OMRGLUEDIR)/rbgcsupport.$(OBJEXT) \
+			$(OMRGLUEDIR)/vmaccess.$(OBJEXT) \
+			$(OMRGLUEDIR)/rbomrinit.$(OBJEXT) \
+			$(OMRGLUEDIR)/rbomrprofiler.$(OBJEXT) \
+			$(OMRGLUEDIR)/LanguageVMGlue.$(OBJEXT) \
+			$(OMRGLUEDIR)/UtilGlue.$(OBJEXT) \
+			$(OMRGLUEDIR)/VerboseManagerImpl.$(OBJEXT) \
+			$(OMRGLUEDIR)/StartupManagerImpl.$(OBJEXT)
+else
+OMRGLUE_OBJS=
+endif # ifdef WITH_OMR
+
+ifdef WITH_OMR_JIT
+   JITOBJS = omr_jit.$(OBJEXT)
+else
+   JITOBJS = no_jit.$(OBJEXT)
+endif
+
+
 
 COMMONOBJS    = array.$(OBJEXT) \
 		bignum.$(OBJEXT) \
@@ -101,7 +131,9 @@ COMMONOBJS    = array.$(OBJEXT) \
 		vm_trace.$(OBJEXT) \
 		thread.$(OBJEXT) \
 		cont.$(OBJEXT) \
+		$(OMRGLUE_OBJS) \
 		$(DTRACE_OBJ) \
+		$(JITOBJS) \
 		$(BUILTIN_ENCOBJS) \
 		$(BUILTIN_TRANSOBJS) \
 		$(MISSING)
@@ -150,7 +182,7 @@ BOOTSTRAPRUBY = $(BASERUBY)
 
 COMPILE_PRELUDE = $(srcdir)/tool/generic_erb.rb $(srcdir)/template/prelude.c.tmpl
 
-all: showflags main docs
+ruby_all: showflags main docs
 
 main: showflags $(ENCSTATIC:static=lib)encs exts
 	@$(NULLCMD)
@@ -219,7 +251,7 @@ mini: PHONY miniruby$(EXEEXT)
 
 $(PROGRAM) $(WPROGRAM): $(LIBRUBY) $(MAINOBJ) $(OBJS) $(EXTOBJS) $(SETUP) $(PREP)
 
-$(LIBRUBY_A):	$(LIBRUBY_A_OBJS) $(MAINOBJ) $(INITOBJS) $(ARCHFILE)
+$(LIBRUBY_A):	$(LIBRUBY_A_OBJS) $(OMRGLUE_A_OBJS) $(OMRLIB) $(MAINOBJ) $(INITOBJS) $(ARCHFILE)
 
 $(LIBRUBY_SO):	$(OBJS) $(DLDOBJS) $(LIBRUBY_A) $(PREP) $(LIBRUBY_SO_UPDATE) $(BUILTIN_ENCOBJS)
 
@@ -228,7 +260,7 @@ $(LIBRUBY_EXTS):
 
 $(STATIC_RUBY)$(EXEEXT): $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A)
 	$(Q)$(RM) $@
-	$(PURIFY) $(CC) $(MAINOBJ) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)$@ $(LDFLAGS) $(XLDFLAGS)
+	$(PURIFY) $(CXX) $(MAINOBJ) $(OMRGLUE_OBJS) $(DLDOBJS) $(EXTOBJS) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)$@ $(LDFLAGS) $(XLDFLAGS)
 
 ruby.imp: $(COMMONOBJS)
 	$(Q)$(NM) -Pgp $(COMMONOBJS) | \
@@ -462,7 +494,7 @@ install-prereq: $(CLEAR_INSTALLED_LIST) yes-fake sudo-precheck PHONY
 clear-installed-list: PHONY
 	@> $(INSTALLED_LIST) set MAKE="$(MAKE)"
 
-clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout clean-platform
+clean: clean-ext clean-local clean-enc clean-golf clean-rdoc clean-capi clean-extout clean-platform $(OMRCLEAN)
 clean-local:: clean-runnable
 	$(Q)$(RM) $(OBJS) $(MINIOBJS) $(MAINOBJ) $(LIBRUBY_A) $(LIBRUBY_SO) $(LIBRUBY) $(LIBRUBY_ALIASES)
 	$(Q)$(RM) $(PROGRAM) $(WPROGRAM) miniruby$(EXEEXT) dmyext.$(OBJEXT) dmyenc.$(OBJEXT) $(ARCHFILE) .*.time
@@ -611,7 +643,7 @@ $(ENC_MK): $(srcdir)/enc/make_encmake.rb $(srcdir)/enc/Makefile.in $(srcdir)/enc
 
 .PRECIOUS: $(MKFILES)
 
-.PHONY: PHONY all fake prereq incs srcs preludes help
+.PHONY: PHONY ruby_all fake prereq incs srcs preludes help
 .PHONY: test install install-nodoc install-doc dist
 .PHONY: loadpath golf capi rdoc install-prereq clear-installed-list
 .PHONY: clean clean-ext clean-local clean-enc clean-golf clean-rdoc clean-html clean-extout

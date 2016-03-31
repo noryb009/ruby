@@ -246,7 +246,7 @@ assert_finish 3, %{
   th.join
 }
 
-assert_finish 3, %{
+assert_finish 30, %{
   require 'timeout'
   th = Thread.new {sleep 0.2}
   begin
@@ -426,7 +426,7 @@ assert_equal 'ok', %{
   $result
 }
 
-assert_finish 3, %q{
+assert_finish 30, %q{
   require 'thread'
 
   lock = Mutex.new

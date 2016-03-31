@@ -331,6 +331,10 @@ load_relative = configure_args.include?("--enable-load-relative")
 install?(:local, :arch, :bin, :'bin-arch') do
   prepare "binary commands", bindir
 
+  if CONFIG["WITH_OMR"] == "yes"
+    Dir.glob("omr/*TraceFormat.dat") {|x| install x, bindir, :mode => $data_mode }
+  end
+
   install ruby_install_name+exeext, bindir, :mode => $prog_mode, :strip => $strip
   if rubyw_install_name and !rubyw_install_name.empty?
     install rubyw_install_name+exeext, bindir, :mode => $prog_mode, :strip => $strip

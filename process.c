@@ -100,6 +100,11 @@
 #define open	rb_w32_uopen
 #endif
 
+#if defined(OMR)
+#include "omr.h"
+#include "rbomrinit.h"
+#endif /* OMR */
+
 #if defined(HAVE_TIMES) || defined(_WIN32)
 static VALUE rb_cProcessTms;
 #endif
@@ -1347,12 +1352,12 @@ mark_exec_arg(void *ptr)
 {
     struct rb_execarg *eargp = ptr;
     if (eargp->use_shell)
-        rb_gc_mark(eargp->invoke.sh.shell_script);
+	rb_gc_mark(eargp->invoke.sh.shell_script);
     else {
-        rb_gc_mark(eargp->invoke.cmd.command_name);
-        rb_gc_mark(eargp->invoke.cmd.command_abspath);
-        rb_gc_mark(eargp->invoke.cmd.argv_str);
-        rb_gc_mark(eargp->invoke.cmd.argv_buf);
+	rb_gc_mark(eargp->invoke.cmd.command_name);
+	rb_gc_mark(eargp->invoke.cmd.command_abspath);
+	rb_gc_mark(eargp->invoke.cmd.argv_str);
+	rb_gc_mark(eargp->invoke.cmd.argv_buf);
     }
     rb_gc_mark(eargp->redirect_fds);
     rb_gc_mark(eargp->envp_str);
@@ -1365,6 +1370,7 @@ mark_exec_arg(void *ptr)
     rb_gc_mark(eargp->fd_dup2_child);
     rb_gc_mark(eargp->env_modification);
     rb_gc_mark(eargp->chdir_dir);
+
 }
 
 static size_t
@@ -3551,7 +3557,11 @@ retry_fork_async_signal_safe(int *status, int *ep,
     while (1) {
         prefork();
         disable_child_handler_before_fork(&old);
-#ifdef HAVE_WORKING_VFORK
+#if defined(OMR)
+        rb_omr_prefork(GET_VM());
+#endif /* defined(OMR) */
+#if defined(HAVE_WORKING_VFORK) && !defined(OMR)
+        /* NEVER vfork. Especially with privilege, but especially with OMR. */
         if (!has_privilege())
             pid = vfork();
         else
@@ -3561,6 +3571,9 @@ retry_fork_async_signal_safe(int *status, int *ep,
 #endif
         if (pid == 0) {/* fork succeed, child process */
             int ret;
+#if defined(OMR)
+            rb_omr_postfork_child(GET_VM());
+#endif /* defined(OMR) */
             close(ep[0]);
             ret = disable_child_handler_fork_child(&old, errmsg, errmsg_buflen); /* async-signal-safe */
             if (ret == 0) {
@@ -3573,6 +3586,10 @@ retry_fork_async_signal_safe(int *status, int *ep,
 #else
             _exit(127);
 #endif
+        } else {
+#if defined(OMR)
+            rb_omr_postfork_parent(GET_VM());
+#endif /* defined(OMR) */
         }
         preserving_errno(disable_child_handler_fork_parent(&old));
         if (0 < pid) /* fork succeed, parent process */
@@ -3622,9 +3639,20 @@ retry_fork_ruby(int *status)
     while (1) {
         prefork();
         before_fork_ruby();
+#if defined(OMR)
+        rb_omr_prefork(GET_VM());
+#endif /* defined(OMR) */
         pid = fork();
-        if (pid == 0) /* fork succeed, child process */
+        if (pid == 0) /* fork succeed, child process */ {
+#if defined(OMR)
+            rb_omr_postfork_child(GET_VM());
+#endif /* defined(OMR) */
             return pid;
+        } else {
+#if defined(OMR)
+            rb_omr_postfork_parent(GET_VM());
+#endif /* defined(OMR) */
+        }
         preserving_errno(after_fork_ruby());
         if (0 < pid) /* fork succeed, parent process */
             return pid;
@@ -3704,6 +3732,7 @@ rb_f_fork(VALUE obj)
       default:
 	return PIDT2NUM(pid);
     }
+
 }
 #else
 #define rb_f_fork rb_f_notimplement

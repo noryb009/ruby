@@ -16,6 +16,19 @@
 
 #include "ruby/ruby.h"
 #include "ruby/st.h"
+#if defined(OMR)
+/* forward declare to avoid adding omr to the include path of every compile */
+struct OMR_VM;
+struct OMR_VMThread;
+struct MM_SublistPool;
+struct J9VMGC_SublistFragment;
+
+/* These need to go after ruby/ruby.h which includes config.h which sets the
+ * OMR Define.
+ */
+#include "j9pool.h"
+#include "LanguageThreadLocalHeapStruct.h"
+#endif /* OMR */
 
 #include "node.h"
 #include "vm_debug.h"
@@ -31,6 +44,8 @@
 #elif defined(HAVE_PTHREAD_H)
 #include "thread_pthread.h"
 #endif
+
+
 
 #ifndef ENABLE_VM_OBJSPACE
 #ifdef _WIN32
@@ -134,6 +149,7 @@ union iseq_inline_storage_entry {
 /* to avoid warning */
 struct rb_thread_struct;
 struct rb_control_frame_struct;
+struct st_table;
 
 typedef struct rb_call_info_kw_arg_struct {
     int keyword_len;
@@ -193,23 +209,35 @@ typedef struct rb_iseq_location_struct {
 } rb_iseq_location_t;
 
 struct rb_iseq_struct;
+typedef enum iseq_type {
+ISEQ_TYPE_TOP,
+ISEQ_TYPE_METHOD,
+ISEQ_TYPE_BLOCK,
+ISEQ_TYPE_CLASS,
+ISEQ_TYPE_RESCUE,
+ISEQ_TYPE_ENSURE,
+ISEQ_TYPE_EVAL,
+ISEQ_TYPE_MAIN,
+ISEQ_TYPE_DEFINED_GUARD
+} iseq_type;
+
+#if OMR_JIT
+struct rb_jit_struct;
+
+typedef enum iseq_jit_state {
+    ISEQ_JIT_STATE_ZERO = 0, /* un-initialized */
+    ISEQ_JIT_STATE_INTERPRETED,
+    ISEQ_JIT_STATE_BLACKLISTED, /* don't try to jit */
+    ISEQ_JIT_STATE_JITTED
+} iseq_jit_state;
+#endif
 
 struct rb_iseq_struct {
     /***************/
     /* static data */
     /***************/
 
-    enum iseq_type {
-	ISEQ_TYPE_TOP,
-	ISEQ_TYPE_METHOD,
-	ISEQ_TYPE_BLOCK,
-	ISEQ_TYPE_CLASS,
-	ISEQ_TYPE_RESCUE,
-	ISEQ_TYPE_ENSURE,
-	ISEQ_TYPE_EVAL,
-	ISEQ_TYPE_MAIN,
-	ISEQ_TYPE_DEFINED_GUARD
-    } type;              /* instruction sequence type */
+    iseq_type type;              /* instruction sequence type */
 #if defined(WORDS_BIGENDIAN) && (SIZEOF_VALUE > SIZEOF_INT)
     char dummy[SIZEOF_VALUE - SIZEOF_INT]; /* [Bug #10037][ruby-core:63721] */
 #endif
@@ -345,6 +373,17 @@ struct rb_iseq_struct {
     /* original iseq, before encoding
      * used for debug/dump (TODO: union with compile_data) */
     VALUE *iseq;
+
+#if defined(OMR_JIT)
+    struct {
+        iseq_jit_state state;
+        union {
+            long     count; /* number of interpretations (state == ISEQ_JIT_STATE_INT) */
+            void    *code;  /* address of jitted code (state == ISEQ_JIT_STATE_JITTED) */
+            /* OMR:TODO: we need multiple entry points to deal with complex args */
+        } u;
+    } jit;
+#endif
 };
 
 enum ruby_special_exceptions {
@@ -464,7 +503,6 @@ typedef struct rb_vm_struct {
      * objects so do *NOT* mark this when you GC.
      */
     struct RArray at_exit;
-
     VALUE *defined_strings;
     st_table *frozen_strings;
 
@@ -477,6 +515,28 @@ typedef struct rb_vm_struct {
     } default_params;
 
     short redefined_flag[BOP_LAST_];
+
+#if defined(OMR_JIT)
+    struct rb_jit_struct *jit;
+#endif
+#if defined(OMR)
+    OMR_VM *_omrVM;
+    /* Support for VM Access Mechanism */
+    omrthread_monitor_t exclusiveAccessMutex;
+    uintptr_t exclusiveAccessState;
+    uintptr_t exclusiveAccessResponseCount;
+
+    struct rb_thread_struct *exclusiveVMAccessQueueHead;
+    struct rb_thread_struct *exclusiveVMAccessQueueTail;
+    /* A 'list' of objects with members not on the heap. These objects need to
+     * be walked during GC & correctly cleaned up to avoid leaking memory.
+     */
+    J9Pool* finalizeList[RUBY_TYPE_COUNT];
+    void *rDataParallelFinalizeList;
+    void *rDataParallelFinalizeFragment;
+    int enableMallocGC;
+#endif /* OMR */
+
 } rb_vm_t;
 
 /* default values */
@@ -733,6 +793,20 @@ typedef struct rb_thread_struct {
     void *altstack;
 #endif
     unsigned long running_time_us;
+
+#if defined(OMR)
+    struct OMR_VMThread *_omrVMThread;
+    omrTlhStruct omrTlh;
+    /* VM Access Support */
+    uintptr_t publicFlags;
+    omrthread_monitor_t publicFlagsMutex;
+    struct rb_thread_struct *exclusiveVMAccessQueueNext;
+    struct rb_thread_struct *exclusiveVMAccessQueuePrevious;
+#endif /* OMR */
+
+#if defined(OMR)
+    int bindAllocatedFlag;
+#endif /* defined(OMR) */
 } rb_thread_t;
 
 typedef enum {
@@ -858,6 +932,12 @@ enum vm_special_object_type {
 #define VM_FRAME_FLAG_BMETHOD 0x0400
 #define VM_FRAME_TYPE_FINISH_P(cfp)  (((cfp)->flag & VM_FRAME_FLAG_FINISH) != 0)
 #define VM_FRAME_TYPE_BMETHOD_P(cfp) (((cfp)->flag & VM_FRAME_FLAG_BMETHOD) != 0)
+#ifdef OMR_JIT
+#define VM_FRAME_FLAG_JITTED 0x0800
+#define VM_FRAME_TYPE_JITTED_P(cfp) (((cfp)->flag & VM_FRAME_FLAG_JITTED) != 0)
+#else
+#define VM_FRAME_TYPE_JITTED_P(cfp) (0)
+#endif
 
 #define RUBYVM_CFUNC_FRAME_P(cfp) \
   (VM_FRAME_TYPE(cfp) == VM_FRAME_MAGIC_CFUNC)
@@ -957,7 +1037,7 @@ VALUE rb_vm_call(rb_thread_t *th, VALUE recv, VALUE id, int argc,
 		 const VALUE *argv, const rb_method_entry_t *me,
 		 VALUE defined_class);
 void rb_unlink_method_entry(rb_method_entry_t *me);
-void rb_gc_mark_unlinked_live_method_entries(void *pvm);
+void rb_gc_mark_unlinked_live_method_entries(void *pvm, rb_omr_markstate_t ms);
 
 void rb_thread_start_timer_thread(void);
 void rb_thread_stop_timer_thread(int);

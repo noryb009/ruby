@@ -80,6 +80,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_reachable_objects_from
+    skip "OMRTODO: Test disabled. Calls marking functions from outside GC, not supported by OMR."
     assert_separately %w[--disable-gem -robjspace], __FILE__, __LINE__, <<-'eom'
     assert_equal(nil, ObjectSpace.reachable_objects_from(nil))
     assert_equal([Array, 'a', 'b', 'c'], ObjectSpace.reachable_objects_from(['a', 'b', 'c']))
@@ -106,6 +107,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_reachable_objects_from_root
+    skip "OMRTODO: Test disabled. Calls marking functions from outside GC, not supported by OMR."
     root_objects = ObjectSpace.reachable_objects_from_root
 
     assert_operator(root_objects.size, :>, 0)
@@ -118,6 +120,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_reachable_objects_size
+    skip "OMRTODO: Test disabled. Calls marking functions from outside GC, not supported by OMR."
     assert_separately %w[--disable-gem -robjspace], __FILE__, __LINE__, <<-'eom'
     ObjectSpace.each_object{|o|
       ObjectSpace.reachable_objects_from(o).each{|reached_obj|
@@ -199,12 +202,14 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_dump_flags
+    skip "OMRTODO: Test disabled. We need to rewrite the object dumping code to work with the OMR heap before re-enabling."
     info = ObjectSpace.dump("foo".freeze)
     assert_match /"wb_protected":true, "old":true/, info
     assert_match /"fstring":true/, info
   end
 
   def test_dump_to_default
+    skip "OMRTODO: Test disabled. We need to rewrite the object dumping code to work with the OMR heap before re-enabling."
     line = nil
     info = nil
     ObjectSpace.trace_object_allocations do
@@ -216,6 +221,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_dump_to_io
+    skip "OMRTODO: Test disabled. We need to rewrite the object dumping code to work with the OMR heap before re-enabling."
     line = nil
     info = IO.pipe do |r, w|
       th = Thread.start {r.read}
@@ -248,6 +254,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_dump_all
+    skip "OMRTODO: Test disabled. We need to rewrite the object dumping code to work with the OMR heap before re-enabling."
     entry = /"bytesize":11, "value":"TEST STRING", "encoding":"UTF-8", "file":"-", "line":4, "method":"dump_my_heap_please", "generation":/
 
     assert_in_out_err(%w[-robjspace], <<-'end;') do |output, error|
@@ -281,6 +288,7 @@ class TestObjSpace < Test::Unit::TestCase
   end
 
   def test_dump_uninitialized_file
+    skip "OMRTODO: Test disabled. In OMR, rb_objspace_reachable_objects_from is not currently supported since it's not a priority for now."
     assert_in_out_err(%[-robjspace], <<-RUBY) do |(output), (error)|
       puts ObjectSpace.dump(File.allocate)
     RUBY

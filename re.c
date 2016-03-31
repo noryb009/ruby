@@ -840,26 +840,26 @@ onig_new_with_source(regex_t** reg, const UChar* pattern, const UChar* pattern_e
 {
   int r;
 
-  *reg = (regex_t* )malloc(sizeof(regex_t));
+  *reg = (regex_t* )zalloc_omr_buffer(sizeof(regex_t));
   if (IS_NULL(*reg)) return ONIGERR_MEMORY;
 
   r = onig_reg_init(*reg, option, ONIGENC_CASE_FOLD_DEFAULT, enc, syntax);
+  (*reg)->heap_allocated = TRUE;
+
   if (r) goto err;
 
   r = onig_compile(*reg, pattern, pattern_end, einfo, sourcefile, sourceline);
   if (r) {
   err:
-    onig_free(*reg);
     *reg = NULL;
   }
   return r;
 }
 
-static Regexp*
+static void
 make_regexp(const char *s, long len, rb_encoding *enc, int flags, onig_errmsg_buffer err,
-	const char *sourcefile, int sourceline)
+	const char *sourcefile, int sourceline, Regexp** rp)
 {
-    Regexp *rp;
     int r;
     OnigErrorInfo einfo;
 
@@ -870,13 +870,12 @@ make_regexp(const char *s, long len, rb_encoding *enc, int flags, onig_errmsg_bu
        from that.
     */
 
-    r = onig_new_with_source(&rp, (UChar*)s, (UChar*)(s + len), flags,
+    r = onig_new_with_source(rp, (UChar*)s, (UChar*)(s + len), flags,
 		 enc, OnigDefaultSyntax, &einfo, sourcefile, sourceline);
     if (r) {
 	onig_error_code_to_str((UChar*)err, r, &einfo);
-	return 0;
+	*rp = 0;
     }
-    return rp;
 }
 
 
@@ -902,7 +901,7 @@ match_alloc(VALUE klass)
     match->str = 0;
     match->rmatch = 0;
     match->regexp = 0;
-    match->rmatch = ZALLOC(struct rmatch);
+    match->rmatch = (struct rmatch*)zalloc_omr_buffer(sizeof(struct rmatch));
 
     return (VALUE)match;
 }
@@ -952,7 +951,7 @@ update_char_offset(VALUE match)
     num_regs = rm->regs.num_regs;
 
     if (rm->char_offset_num_allocated < num_regs) {
-        REALLOC_N(rm->char_offset, struct rmatch_offset, num_regs);
+        rm->char_offset = realloc_omr_buffer(rm->char_offset, num_regs*sizeof(struct rmatch_offset));
         rm->char_offset_num_allocated = num_regs;
     }
 
@@ -1033,7 +1032,7 @@ match_init_copy(VALUE obj, VALUE orig)
     }
     else {
         if (rm->char_offset_num_allocated < rm->regs.num_regs) {
-            REALLOC_N(rm->char_offset, struct rmatch_offset, rm->regs.num_regs);
+            rm->char_offset = realloc_omr_buffer(rm->char_offset, rm->regs.num_regs*sizeof(struct rmatch_offset));
             rm->char_offset_num_allocated = rm->regs.num_regs;
         }
         MEMCPY(rm->char_offset, RMATCH(orig)->rmatch->char_offset,
@@ -1378,10 +1377,10 @@ rb_reg_prepare_enc(VALUE re, VALUE str, int warn)
     return enc;
 }
 
-regex_t *
-rb_reg_prepare_re(VALUE re, VALUE str)
+/* TODO: lpnguyen: Undo this output param stuff once we have OMR buf conservative mark going */
+void
+rb_reg_prepare_re(VALUE re, VALUE str, regex_t** reg)
 {
-    regex_t *reg = RREGEXP(re)->ptr;
     onig_errmsg_buffer err = "";
     int r;
     OnigErrorInfo einfo;
@@ -1389,11 +1388,12 @@ rb_reg_prepare_re(VALUE re, VALUE str)
     VALUE unescaped;
     rb_encoding *fixed_enc = 0;
     rb_encoding *enc = rb_reg_prepare_enc(re, str, 1);
+    *reg = RREGEXP(re)->ptr;
 
-    if (reg->enc == enc) return reg;
+    if ((*reg)->enc == enc) return;
 
     rb_reg_check(re);
-    reg = RREGEXP(re)->ptr;
+    *reg = RREGEXP(re)->ptr;
     pattern = RREGEXP_SRC_PTR(re);
 
     unescaped = rb_reg_preprocess(
@@ -1404,9 +1404,9 @@ rb_reg_prepare_re(VALUE re, VALUE str)
 	rb_raise(rb_eArgError, "regexp preprocess failed: %s", err);
     }
 
-    r = onig_new(&reg, (UChar* )RSTRING_PTR(unescaped),
+    r = onig_new(reg, (UChar* )RSTRING_PTR(unescaped),
 		 (UChar* )(RSTRING_PTR(unescaped) + RSTRING_LEN(unescaped)),
-		 reg->options, enc,
+		 (*reg)->options, enc,
 		 OnigDefaultSyntax, &einfo);
     if (r) {
 	onig_error_code_to_str((UChar*)err, r, &einfo);
@@ -1414,7 +1414,6 @@ rb_reg_prepare_re(VALUE re, VALUE str)
     }
 
     RB_GC_GUARD(unescaped);
-    return reg;
 }
 
 long
@@ -1456,16 +1455,24 @@ rb_reg_search0(VALUE re, VALUE str, long pos, int reverse, int set_backref_str)
     VALUE match;
     struct re_registers regi, *regs = &regi;
     char *range = RSTRING_PTR(str);
-    regex_t *reg;
+    regex_t **reg;
     int tmpreg;
+#if defined(OMR)
+    /* A GC may occur before reg is assigned or no longer needed.
+     * A temporary REGEX object is created for the sole purpose of
+     * temporarily making reg reachable for marking during a GC.
+     */
+    VALUE omrRe = rb_reg_alloc();
+    reg = &RREGEXP(omrRe)->ptr;
+#endif /* OMR */
 
     if (pos > RSTRING_LEN(str) || pos < 0) {
 	rb_backref_set(Qnil);
 	return -1;
     }
 
-    reg = rb_reg_prepare_re(re, str);
-    tmpreg = reg != RREGEXP(re)->ptr;
+    rb_reg_prepare_re(re, str, reg);
+    tmpreg = *reg != RREGEXP(re)->ptr;
     if (!tmpreg) RREGEXP(re)->usecnt++;
 
     match = rb_backref_get();
@@ -1478,12 +1485,17 @@ rb_reg_search0(VALUE re, VALUE str, long pos, int reverse, int set_backref_str)
 	}
     }
     if (NIL_P(match)) {
+#if defined(OMR)
+	match = match_alloc(rb_cMatch);
+	regs = RMATCH_REGS(match);
+#else /* defined(OMR) */
 	MEMZERO(regs, struct re_registers, 1);
+#endif /* defined(OMR) */
     }
     if (!reverse) {
 	range += RSTRING_LEN(str);
     }
-    result = onig_search(reg,
+    result = onig_search(*reg,
 			 (UChar*)(RSTRING_PTR(str)),
 			 ((UChar*)(RSTRING_PTR(str)) + RSTRING_LEN(str)),
 			 ((UChar*)(RSTRING_PTR(str)) + pos),
@@ -1492,16 +1504,20 @@ rb_reg_search0(VALUE re, VALUE str, long pos, int reverse, int set_backref_str)
     if (!tmpreg) RREGEXP(re)->usecnt--;
     if (tmpreg) {
 	if (RREGEXP(re)->usecnt) {
-	    onig_free(reg);
+	    onig_free(*reg);
 	}
 	else {
 	    onig_free(RREGEXP(re)->ptr);
-	    RREGEXP(re)->ptr = reg;
+	    RREGEXP(re)->ptr = *reg;
 	}
     }
+
+#if defined(OMR)
+    /* Clear ptr in omrRe to avoid freeing the regex_t. */
+    RREGEXP(omrRe)->ptr = NULL;
+#endif /* OMR */
+
     if (result < 0) {
-	if (regs == &regi)
-	    onig_region_free(regs, 0);
 	if (result == ONIG_MISMATCH) {
 	    rb_backref_set(Qnil);
 	    return result;
@@ -2511,7 +2527,7 @@ rb_reg_initialize(VALUE obj, const char *s, long len, rb_encoding *enc,
     if (FL_TEST(obj, REG_LITERAL))
 	rb_raise(rb_eSecurityError, "can't modify literal regexp");
     if (re->ptr)
-        rb_raise(rb_eTypeError, "already initialized regexp");
+	rb_raise(rb_eTypeError, "already initialized regexp");
     re->ptr = 0;
 
     if (rb_enc_dummy_p(enc)) {
@@ -2546,9 +2562,9 @@ rb_reg_initialize(VALUE obj, const char *s, long len, rb_encoding *enc,
         re->basic.flags |= REG_ENCODING_NONE;
     }
 
-    re->ptr = make_regexp(RSTRING_PTR(unescaped), RSTRING_LEN(unescaped), enc,
+     make_regexp(RSTRING_PTR(unescaped), RSTRING_LEN(unescaped), enc,
 			  options & ARG_REG_OPTION_MASK, err,
-			  sourcefile, sourceline);
+			  sourcefile, sourceline, &re->ptr);
     if (!re->ptr) return -1;
     RB_OBJ_WRITE(obj, &re->src, rb_fstring(rb_enc_str_new(s, len, enc)));
     RB_GC_GUARD(unescaped);

@@ -33,6 +33,12 @@ const char ruby_description[] = RUBY_DESCRIPTION;
 const char ruby_copyright[] = RUBY_COPYRIGHT;
 const char ruby_engine[] = "ruby";
 VALUE ruby_engine_name = Qnil;
+#if defined(OMR)
+const char ruby_omr_description[] = OMR_DESCRIPTION;
+const char ruby_omr_level[] = OMR_LEVEL;
+const char ruby_omr_ruby_level[] = RUBY_LEVEL;
+const char ruby_omr_jit_level[] = JIT_LEVEL;
+#endif /* OMR */
 
 /*! Defines platform-depended Ruby-level constants */
 void
@@ -71,6 +77,11 @@ Init_version(void)
      * The engine or interpreter this ruby uses.
      */
     rb_define_global_const("RUBY_ENGINE", ruby_engine_name = MKSTR(engine));
+
+#if defined(OMR)
+    /* OMR description.  VM build ID, jit level, etc */
+    rb_define_global_const("OMR_DESCRIPTION", MKSTR(omr_description));
+#endif /* OMR */
 }
 
 /*! Prints the version information of the CRuby interpreter to stdout. */
@@ -83,6 +94,19 @@ ruby_show_version(void)
 #endif
     fflush(stdout);
 }
+
+#if defined(OMR)
+/*! Prints the version information of the OMR components to stdout. */
+void
+ruby_show_omr_version(void)
+{
+    PRINT(omr_description);
+    PRINT(omr_ruby_level);
+    PRINT(omr_level);
+    PRINT(omr_jit_level);
+    fflush(stdout);
+}
+#endif /* OMR */
 
 /*! Prints the copyright notice of the CRuby interpreter to stdout and \em exits
  *  this process successfully.

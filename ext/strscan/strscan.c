@@ -8,10 +8,15 @@
     the Ruby License. For details, see the file COPYING.
 */
 
+#include "rbgcsupport.h"
 #include "ruby/ruby.h"
 #include "ruby/re.h"
 #include "ruby/encoding.h"
 #include "regint.h"
+
+#if defined(OMR)
+#include "rbgcsupport.h"
+#endif
 
 #define STRSCAN_VERSION "0.7.0"
 
@@ -166,15 +171,18 @@ static void
 strscan_mark(void *ptr)
 {
     struct strscanner *p = ptr;
-    rb_gc_mark(p->str);
+    rb_omr_markstate_t ms = rb_omr_get_markstate();
+    if (NULL != p) {
+    	rb_gc_mark(p->str);
+	    omr_onig_region_mark(ms, &p->regs);
+    }
 }
 
 static void
 strscan_free(void *ptr)
 {
     struct strscanner *p = ptr;
-    onig_region_free(&(p->regs), 0);
-    ruby_xfree(p);
+    ruby_xfree(ptr);
 }
 
 static size_t
@@ -190,20 +198,24 @@ strscan_memsize(const void *ptr)
 
 static const rb_data_type_t strscanner_type = {
     "StringScanner",
-    {strscan_mark, strscan_free, strscan_memsize},
-    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+    {
+	strscan_mark,
+	0,
+	strscan_memsize
+    },
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY | RDATA_HEAP_ALLOC_STRUCT
 };
 
 static VALUE
 strscan_s_allocate(VALUE klass)
 {
     struct strscanner *p;
+    VALUE strScanObject = TypedData_Make_Struct(klass, struct strscanner , &strscanner_type, p);
 
-    p = ZALLOC(struct strscanner);
     CLEAR_MATCH_STATUS(p);
     onig_region_init(&(p->regs));
     p->str = Qnil;
-    return TypedData_Wrap_Struct(klass, &strscanner_type, p);
+    return strScanObject;
 }
 
 /*
@@ -448,9 +460,16 @@ strscan_set_pos(VALUE self, VALUE v)
 static VALUE
 strscan_do_scan(VALUE self, VALUE regex, int succptr, int getstr, int headonly)
 {
-    regex_t *rb_reg_prepare_re(VALUE re, VALUE str);
     struct strscanner *p;
-    regex_t *re;
+    regex_t** re;
+#if defined(OMR)
+/* A GC may occur before re is assigned or no longer needed.
+ * A temporary REGEX object is created for the sole purpose of
+ * temporarily making re reachable for marking during a GC.
+ */
+    VALUE omrRe = rb_reg_alloc();
+    re = &RREGEXP(omrRe)->ptr;
+#endif /* OMR */
     long ret;
     int tmpreg;
 
@@ -463,17 +482,17 @@ strscan_do_scan(VALUE self, VALUE regex, int succptr, int getstr, int headonly)
     }
 
     p->regex = regex;
-    re = rb_reg_prepare_re(regex, p->str);
-    tmpreg = re != RREGEXP(regex)->ptr;
+    rb_reg_prepare_re(regex, p->str, re);
+    tmpreg = *re != RREGEXP(regex)->ptr;
     if (!tmpreg) RREGEXP(regex)->usecnt++;
 
     if (headonly) {
-        ret = onig_match(re, (UChar* )CURPTR(p),
+        ret = onig_match(*re, (UChar* )CURPTR(p),
                          (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                          (UChar* )CURPTR(p), &(p->regs), ONIG_OPTION_NONE);
     }
     else {
-        ret = onig_search(re,
+        ret = onig_search(*re,
                           (UChar* )CURPTR(p), (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                           (UChar* )CURPTR(p), (UChar* )(CURPTR(p) + S_RESTLEN(p)),
                           &(p->regs), ONIG_OPTION_NONE);
@@ -481,13 +500,18 @@ strscan_do_scan(VALUE self, VALUE regex, int succptr, int getstr, int headonly)
     if (!tmpreg) RREGEXP(regex)->usecnt--;
     if (tmpreg) {
         if (RREGEXP(regex)->usecnt) {
-            onig_free(re);
+            onig_free(*re);
         }
         else {
             onig_free(RREGEXP(regex)->ptr);
-            RREGEXP(regex)->ptr = re;
+            RREGEXP(regex)->ptr = *re;
         }
     }
+
+#if defined(OMR)
+    /* Clear re to avoid double-freeing *re when omrRe is finalized. */
+    *re = NULL;
+#endif
 
     if (ret == -2) rb_raise(ScanError, "regexp buffer overflow");
     if (ret < 0) {

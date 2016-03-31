@@ -245,8 +245,9 @@ rb_find_encoding(VALUE enc)
     return rb_enc_from_index(idx);
 }
 
+/* TODO: Where did the implementation go? ~RY */
 void
-rb_gc_mark_encodings(void)
+rb_gc_mark_encodings(rb_omr_markstate_t ms)
 {
 }
 

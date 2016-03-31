@@ -95,10 +95,12 @@
 
 #ifndef RUBY_DEFINES_H
 #include "ruby/ruby.h"
+#if !defined(RWY_DEBUG)
 #undef xmalloc
 #undef xrealloc
 #undef xcalloc
 #undef xfree
+#endif /* !RWY_DEBUG */
 #endif
 
 /* */
@@ -482,48 +484,85 @@ typedef struct _BBuf {
   unsigned int alloc;
 } BBuf;
 
-#define BBUF_INIT(buf,size)    onig_bbuf_init((BBuf* )(buf), (size))
+/* regex_t has common members with BBuf, these macros are used on both regex_t's
+ * and BBuf. If using these macro's on a regex_t, you should pass it's heap_allocated
+ * field to the OMR version of the macro. E.g. OMR_BBUF_INIT(reg, <size>, reg->heap_allocated)
+ */
+#define OMR_BBUF_INIT(buf,size,heap_allocated)	onig_bbuf_init((BBuf* )(buf), (size), (heap_allocated))
+#define BBUF_INIT(buf,size)						OMR_BBUF_INIT((buf),(size),(FALSE))
 
-#define BBUF_SIZE_INC(buf,inc) do{\
+#define OMR_BBUF_SIZE_INC(buf,inc, heap_allocated) do{\
   (buf)->alloc += (inc);\
-  (buf)->p = (UChar* )xrealloc((buf)->p, (buf)->alloc);\
+  if (heap_allocated) {\
+    (buf)->p = (UChar* )realloc_omr_buffer((buf)->p, (buf)->alloc);\
+  } else {\
+    (buf)->p = (UChar* )xrealloc((buf)->p, (buf)->alloc);\
+  }\
   if (IS_NULL((buf)->p)) return(ONIGERR_MEMORY);\
 } while (0)
+#define BBUF_SIZE_INC(buf,inc)					OMR_BBUF_SIZE_INC((buf), (inc), (FALSE))
 
-#define BBUF_EXPAND(buf,low) do{\
+
+#define OMR_BBUF_EXPAND(buf,low, heap_allocated) do{\
   do { (buf)->alloc *= 2; } while ((buf)->alloc < (unsigned int )low);\
-  (buf)->p = (UChar* )xrealloc((buf)->p, (buf)->alloc);\
+  if (heap_allocated) {\
+    (buf)->p = (UChar* )realloc_omr_buffer((buf)->p, (buf)->alloc);\
+  } else {\
+    (buf)->p = (UChar* )xrealloc((buf)->p, (buf)->alloc);\
+  }\
   if (IS_NULL((buf)->p)) return(ONIGERR_MEMORY);\
 } while (0)
+#define BBUF_EXPAND(buf,low)					OMR_BBUF_EXPAND((buf),(low), (FALSE))
 
-#define BBUF_ENSURE_SIZE(buf,size) do{\
+#define OMR_BBUF_ENSURE_SIZE(buf,size, heap_allocated) do{\
   unsigned int new_alloc = (buf)->alloc;\
   while (new_alloc < (unsigned int )(size)) { new_alloc *= 2; }\
   if ((buf)->alloc != new_alloc) {\
-    (buf)->p = (UChar* )xrealloc((buf)->p, new_alloc);\
+    if (heap_allocated) {\
+	  (buf)->p = (UChar* )realloc_omr_buffer((buf)->p, new_alloc);\
+    } else {\
+	  (buf)->p = (UChar* )xrealloc((buf)->p, new_alloc);\
+	  }\
     if (IS_NULL((buf)->p)) return(ONIGERR_MEMORY);\
     (buf)->alloc = new_alloc;\
   }\
 } while (0)
+#define BBUF_ENSURE_SIZE(buf,size)				OMR_BBUF_ENSURE_SIZE((buf),(size),(FALSE))
 
-#define BBUF_WRITE(buf,pos,bytes,n) do{\
+#define OMR_BBUF_WRITE(buf,pos,bytes,n,heap_allocated) do{\
   int used = (pos) + (int )(n);\
-  if ((buf)->alloc < (unsigned int )used) BBUF_EXPAND((buf),used);\
+  if ((buf)->alloc < (unsigned int )used) OMR_BBUF_EXPAND((buf),(used),(heap_allocated));\
   xmemcpy((buf)->p + (pos), (bytes), (n));\
   if ((buf)->used < (unsigned int )used) (buf)->used = used;\
 } while (0)
+#define BBUF_WRITE(buf,pos,bytes,n)				OMR_BBUF_WRITE((buf),(pos),(bytes),(n),(FALSE))
 
-#define BBUF_WRITE1(buf,pos,byte) do{\
+#define OMR_BBUF_WRITE1(buf,pos,byte,heap_allocated) do{\
   int used = (pos) + 1;\
-  if ((buf)->alloc < (unsigned int )used) BBUF_EXPAND((buf),used);\
+  if ((buf)->alloc < (unsigned int )used) OMR_BBUF_EXPAND((buf),(used),(heap_allocated));\
   (buf)->p[(pos)] = (UChar )(byte);\
   if ((buf)->used < (unsigned int )used) (buf)->used = used;\
 } while (0)
+#define BBUF_WRITE1(buf,pos,byte)				OMR_BBUF_WRITE1((buf),(pos),(byte),(FALSE))
 
-#define BBUF_ADD(buf,bytes,n)       BBUF_WRITE((buf),(buf)->used,(bytes),(n))
-#define BBUF_ADD1(buf,byte)         BBUF_WRITE1((buf),(buf)->used,(byte))
-#define BBUF_GET_ADD_ADDRESS(buf)   ((buf)->p + (buf)->used)
-#define BBUF_GET_OFFSET_POS(buf)    ((buf)->used)
+#define BBUF_ADD(reg,bytes,n) do {\
+		if (reg->heap_allocated) {\
+			OMR_BBUF_WRITE((reg),(reg)->used,(bytes),(n),(reg)->heap_allocated);\
+		} else {\
+			BBUF_WRITE((reg),(reg)->used,(bytes),(n));\
+		}\
+} while(0)
+
+#define BBUF_ADD1(reg,byte) do{\
+		if (reg->heap_allocated) {\
+			OMR_BBUF_WRITE1((reg),(reg)->used,(byte),(reg)->heap_allocated);\
+		} else {\
+			BBUF_WRITE1((reg),(reg)->used,(byte));\
+		}\
+}while (0)
+
+#define BBUF_GET_ADD_ADDRESS(buf)				((buf)->p + (buf)->used)
+#define BBUF_GET_OFFSET_POS(buf)				((buf)->used)
 
 /* from < to */
 #define BBUF_MOVE_RIGHT(buf,from,to,n) do {\
@@ -923,7 +962,7 @@ extern void onig_print_statistics P_((FILE* f));
 
 extern UChar* onig_error_code_to_format P_((OnigPosition code));
 extern void  onig_snprintf_with_pattern PV_((UChar buf[], int bufsize, OnigEncoding enc, UChar* pat, UChar* pat_end, const UChar *fmt, ...));
-extern int  onig_bbuf_init P_((BBuf* buf, OnigDistance size));
+extern int  onig_bbuf_init P_((BBuf* buf, OnigDistance size, int heap_allocated));
 extern int  onig_compile P_((regex_t* reg, const UChar* pattern, const UChar* pattern_end, OnigErrorInfo* einfo, const char *sourcefile, int sourceline));
 extern void onig_chain_reduce P_((regex_t* reg));
 extern void onig_chain_link_add P_((regex_t* to, regex_t* add));
@@ -941,9 +980,9 @@ typedef st_data_t hash_data_type;
 typedef uintptr_t hash_data_type;
 #endif
 
-extern hash_table_type* onig_st_init_strend_table_with_size P_((st_index_t size));
+extern hash_table_type* onig_st_init_strend_table_with_size P_((st_index_t size, int heap_allocated));
 extern int onig_st_lookup_strend P_((hash_table_type* table, const UChar* str_key, const UChar* end_key, hash_data_type *value));
-extern int onig_st_insert_strend P_((hash_table_type* table, const UChar* str_key, const UChar* end_key, hash_data_type value));
+extern int onig_st_insert_strend P_((hash_table_type* table, const UChar* str_key, const UChar* end_key, hash_data_type value, int heap_alocated));
 
 /* encoding property management */
 #define PROPERTY_LIST_ADD_PROP(Name, CR) \
@@ -968,5 +1007,25 @@ extern size_t onig_memsize P_((const regex_t *reg));
 extern size_t onig_region_memsize P_((const struct re_registers *regs));
 
 RUBY_SYMBOL_EXPORT_END
+
+#ifdef USE_NAMED_GROUP
+
+typedef struct {
+  UChar* name;
+  size_t name_len;   /* byte length */
+  int    back_num;   /* number of backrefs */
+  int    back_alloc;
+  int    back_ref1;
+  int*   back_refs;
+} NameEntry;
+
+#ifdef USE_ST_LIBRARY
+
+typedef st_table  NameTable;
+typedef st_data_t HashDataType;   /* 1.6 st.h doesn't define st_data_t type */
+
+#endif /* USE_ST_LIBRARY */
+#endif /* USE_NAMED_GROUP */
+
 
 #endif /* ONIGURUMA_REGINT_H */
