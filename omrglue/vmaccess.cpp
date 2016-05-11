@@ -36,7 +36,7 @@ void
 acquire_vm_access(rb_thread_t * rubyThread)
 {
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(rubyThread->_omrVMThread);
-	env->_envLanguageInterface->acquireVMAccess(env);
+	env->acquireVMAccess();
 }
 
 void
@@ -50,7 +50,7 @@ release_vm_access(rb_thread_t * rubyThread)
 {
 	Assert_MM_true(NULL != rubyThread->_omrVMThread);
 	MM_EnvironmentBase *env = MM_EnvironmentBase::getEnvironment(rubyThread->_omrVMThread);
-	env->_envLanguageInterface->releaseVMAccess(env);
+	env->releaseVMAccess();
 
 }
 
