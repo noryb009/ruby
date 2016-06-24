@@ -88,6 +88,10 @@ struct jit_callbacks_struct {
 
 typedef struct jit_callbacks_struct jit_callbacks_t;
 
+typedef enum jit_options_bits {
+    TIERED_COMPILATION     = 0x1,
+    CODE_CACHE_RECLAMATION = 0x2,
+} jit_options_bits;
 
 /** 
  * This struct contains pointers to various global variables 
@@ -122,6 +126,15 @@ struct rb_jit_struct {
    /** Default compilation count. */
     int       default_count;
 
+   /** Tiered compilation. */
+    int       tiered_compilation;
+    
+   /** temporary flag for ruby recompilation */
+    int       ruby_recomp_available;
+    
+   /** Used for options bits */
+    long      options;
+    
    /*
     * vm->jit interface
     */
