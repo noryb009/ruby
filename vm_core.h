@@ -221,7 +221,7 @@ ISEQ_TYPE_MAIN,
 ISEQ_TYPE_DEFINED_GUARD
 } iseq_type;
 
-#if OMR_JIT
+#if defined(OMR_JIT)
 struct rb_jit_struct;
 
 typedef enum iseq_jit_state {
