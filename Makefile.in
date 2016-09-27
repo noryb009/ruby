@@ -254,10 +254,13 @@ WITH_OMR_JIT=   @WITH_OMR_JIT@
 
 ifdef WITH_OMR_JIT
 
-TRSRC?=@TRSRC@
-export TRSRC
+RBJITGLUE_DIR?=@RBJITGLUE_DIR@
+RELATIVE_OMR_DIR?=@RELATIVE_OMR_DIR@
+export RBJITGLUE_DIR 
+export RELATIVE_OMR_DIR 
 JIT_SO_NAME="librbjit.so"
 JIT_SO_DIR="$(CURDIR)"
+all_omr_configure_args += --enable-OMR_JIT
 
 endif # WITH_OMR_JIT
 
@@ -294,7 +297,6 @@ postbuild: jit
 install: jit-install
 uninstall: jit-uninstall
 clean: jit-clean
-endif
 
 omr-configure:
 	$(MAKE) -C $(OMRDIR) -f run_configure.mk SPEC="$(SPEC)" OMRGLUE="$(OMRGLUEDIR)" OMRGLUE_INCLUDES="$(RUBY_IPATH)" OMRGLUE_CXXFLAGS="-Wno-error" OMRGLUE_CFLAGS="-Wno-error" EXTRA_CONFIGURE_ARGS="$(all_omr_configure_args)"
@@ -316,9 +318,9 @@ JIT_PARAOPT ?= -j4
 
 jit: jit-prod
 jit-prod:
-	nice $(MAKE) $(JIT_PARAOPT) -C $(TRSRC)/ruby RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=prod  OMR_RUBY_INSTALL=$(OMRDIR)/../
+	nice $(MAKE) $(JIT_PARAOPT) -C $(RBJITGLUE_DIR)/ruby RUBY_DIR=$(abs_srcdir) RELATIVE_OMR_DIR=$(RELATIVE_OMR_DIR) RBJITGLUE_DIR=$(RBJITGLUE_DIR) RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=prod  
 jit-debug:
-	nice $(MAKE) $(JIT_PARAOPT) -C $(TRSRC)/ruby RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=debug OMR_RUBY_INSTALL=$(OMRDIR)/../
+	nice $(MAKE) $(JIT_PARAOPT) -C $(RBJITGLUE_DIR)/ruby RUBY_DIR=$(abs_srcdir) RELATIVE_OMR_DIR=$(RELATIVE_OMR_DIR) RBJITGLUE_DIR=$(RBJITGLUE_DIR) RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=debug 
 
 jit-install: jit
 	$(INSTALL) -D $(JIT_SO_DIR)/$(JIT_SO_NAME) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
@@ -327,9 +329,11 @@ jit-uninstall:
 	$(RM) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
 
 jit-clean:
-	$(MAKE) -C $(TRSRC)/ruby JIT_DLL_DIR="$(JIT_SO_DIR)" OMR_RUBY_INSTALL=$(OMRDIR)/../ clean
+	$(MAKE) -C $(RBJITGLUE_DIR)/ruby RUBY_DIR=$(srcdir) REALTIVE_OMR_DIR=$(OMR_DIR) RBJITGLUE_DIR=$(RBJITGLUE_DIR) JIT_DLL_DIR="$(JIT_SO_DIR)"  clean
 
 .PHONY: jit jit-only jit-install jit-clean
+
+endif
 
 ifdef WITH_OMR_HEALTHCENTER
 install: hc-install
@@ -363,7 +367,6 @@ $(PROGRAM):
 		@$(RM) $@
 		$(ECHO) linking $@
 		$(Q) $(PURIFY) $(CXX) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(MAINLIBS) $(LIBS) $(OUTFLAG)$@
-		$(Q) $(POSTLINK)
 
 # We must `rm' the library each time this rule is invoked because "updating" a
 # MAB library on Apple/NeXT (see --enable-fat-binary in configure) is not

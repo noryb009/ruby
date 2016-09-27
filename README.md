@@ -1,3 +1,6 @@
+This branch contains a modified version of the Ruby VM that builds the 
+[Ruby + OMR Technology Preview](https://github.com/rubyomr-preview/rubyomr-preview).
+
 # What's Ruby
 
 Ruby is the interpreted scripting language for quick and easy object-oriented

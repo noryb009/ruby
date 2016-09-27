@@ -2179,14 +2179,11 @@ FUNC_FASTCALL(rb_vm_opt_struct_aset)(rb_thread_t *th, rb_control_frame_t *reg_cf
 void *
 vm_jit_compile(rb_vm_t *vm, rb_iseq_t *iseq)
 {
-    void *startPC = 0;
-
     assert(   vm->jit
            && vm->jit->compile_f
            && "vm_jit_compile should only be called when we have JIT enabled");
 
-    startPC = (vm->jit->compile_f)(iseq);
-    return startPC;
+    return (vm->jit->compile_f)(iseq);
 }
 
 /*
@@ -2197,20 +2194,35 @@ vm_jit_compile(rb_vm_t *vm, rb_iseq_t *iseq)
 static VALUE
 vm_jit(rb_thread_t *th, rb_iseq_t * iseq)
 {
-   void * pc; 
-   if (!th->vm->jit) return Qfalse; /* Don't compile if we have no jit.  */
-
-   pc = vm_jit_compile(th->vm, iseq);
-   if (pc) {
-      /* OMR:TODO:GVL: we may need to do the following atomically */
-      iseq->jit.u.code  = pc;
-      iseq->jit.state = ISEQ_JIT_STATE_JITTED;
-      return Qtrue; /* jitted now */
-   } else {
-      /* unable to compile - never attempt again */
-      iseq->jit.state = ISEQ_JIT_STATE_BLACKLISTED;
-      return Qfalse;
-   }
+    if (!th->vm->jit) return Qfalse; /* Don't compile if we have no jit.  */
+    
+    iseq_jit_body_info *body_info = (iseq_jit_body_info *)vm_jit_compile(th->vm, iseq);
+    if (body_info) {
+        /* OMR:TODO:GVL: we may need to do the following atomically */
+        
+        body_info->recomp_count = th->vm->jit->default_count;
+        body_info->invoke_count = 0;
+        body_info->prev = NULL;
+        body_info->next = iseq->jit.body_info;
+        if (iseq->jit.body_info) {
+            iseq->jit.body_info->prev = body_info;
+        }
+        iseq->jit.body_info = body_info;
+        iseq->jit.u.code  = body_info->startPC;
+        iseq->jit.state = ISEQ_JIT_STATE_JITTED;
+        return Qtrue; /* jitted now */
+    } else {
+        if (iseq->jit.state == ISEQ_JIT_STATE_JITTED) {
+            /* unable to recompile - never attempt again */
+            iseq->jit.state = ISEQ_JIT_STATE_RECOMP_BLACKLISTED;
+            return Qtrue;
+        }
+        else {
+            /* unable to compile - never attempt again */
+            iseq->jit.state = ISEQ_JIT_STATE_BLACKLISTED;
+            return Qfalse;
+        }
+    }
 }
 
 static VALUE
@@ -2218,16 +2230,29 @@ vm_jitted_p(rb_thread_t *th, rb_iseq_t *iseq)
 {
     if (!th->vm->jit) return Qfalse;
  
-    if (iseq->jit.state == ISEQ_JIT_STATE_JITTED)
-        return Qtrue;
     if (iseq->jit.state == ISEQ_JIT_STATE_BLACKLISTED)
         return Qfalse;
+    
+    if (iseq->jit.state == ISEQ_JIT_STATE_RECOMP_BLACKLISTED)
+        return Qtrue;
 
+    if (iseq->jit.state == ISEQ_JIT_STATE_JITTED) {
+        if (th->vm->jit->options & TIERED_COMPILATION) {
+            --iseq->jit.body_info->recomp_count;
+            
+            if (iseq->jit.body_info->recomp_count < 0) {
+                return vm_jit(th,iseq); 
+            }
+        }
+        return Qtrue;
+    }
+    
     if (iseq->jit.state == ISEQ_JIT_STATE_ZERO) {
         /* uninitialized */
         /* OMR:TODO:GVL: we may need to do the following atomically */
         iseq->jit.u.count = th->vm->jit->default_count;
         iseq->jit.state = ISEQ_JIT_STATE_INTERPRETED;
+        iseq->jit.body_info = NULL;
     }
 
     --iseq->jit.u.count;

@@ -549,8 +549,11 @@ AS_IF([test "x$enable_omr_object_table" != "xno"],
 # OMR JIT Configuration
 AC_MSG_CHECKING([for --with-omr-jit])
 
-AC_ARG_VAR([TRSRC],
-  [path to Testarossa source code. defaults to $srcdir/../tr.source.])
+AC_ARG_VAR([RBJITGLUE_DIR],
+  [path to Ruby JIT glue code. defaults to rbjitglue])
+
+AC_ARG_VAR([RELATIVE_OMR_DIR],
+  [path to omr component Relative to VM, defaults to omr])
 
 AC_ARG_WITH([omr-jit],
   [AS_HELP_STRING([--with-omr-jit],
@@ -564,25 +567,30 @@ AS_IF([test "x$with_omr_jit" = "xyes"],
    [
    WITH_OMR_JIT=$with_omr_jit
 
-   #Define OMR_JIT in config.h
-   AC_DEFINE(OMR_JIT)
    AC_DEFINE(JIT_INTERFACE)
    AC_DEFINE(RUBY_SEND_WITHOUT_BLOCK)
    #g The OMR GC provides OMR_RUBY_VALID_CLASS
    AC_DEFINE(OMR_RUBY_VALID_CLASS)
 
-   # If TRSRC isn't defined, set to default
-   AS_IF([test "x$TRSRC" = "x"],
-     [TRSRC="$srcdir/../tr.source"],
+   # If RBJITGLUE_DIR isn't defined, set to default
+   AS_IF([test "x$RBJITGLUE_DIR" = "x"],
+     [RBJITGLUE_DIR="rbjitglue"],
      [])
 
-   OMR_ABS_PATH(TRSRC, $TRSRC)
+   AS_IF([test "x$RELATIVE_OMR_DIR" = "x"], 
+         [RELATIVE_OMR_DIR="omr"],
+         [])
 
-   AC_MSG_RESULT([yes: TRSRC=$TRSRC])
 
-   AS_IF([test -d "$TRSRC/ibm/codegen"],
+   AC_MSG_RESULT([yes: RBJITGLUE_DIR=$RBJITGLUE_DIR RELATIVE_OMR_DIR=$RELATIVE_OMR_DIR])
+
+   AS_IF([test -d "$RBJITGLUE_DIR/ruby/build"],
          [],
-         [AC_MSG_ERROR([TRSRC misconfigured, cannot find directory $TRSRC/ibm/codegen])])
+         [AC_MSG_ERROR([RBJITGLUE_DIR misconfigured, cannot find directory $RBJITGLUE_DIR/build])])
+
+   AS_IF([test -d "$RELATIVE_OMR_DIR/compiler"],
+         [],
+         [AC_MSG_ERROR([RELATIVE_OMR_DIR misconfigured, cannot find directory $RELATIVE_OMR_DIR/compiler])])
 
    ],
   [AC_MSG_RESULT([no])])

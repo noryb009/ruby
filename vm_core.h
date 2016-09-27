@@ -221,15 +221,25 @@ ISEQ_TYPE_MAIN,
 ISEQ_TYPE_DEFINED_GUARD
 } iseq_type;
 
-#if OMR_JIT
+#if defined(OMR_JIT)
 struct rb_jit_struct;
 
 typedef enum iseq_jit_state {
     ISEQ_JIT_STATE_ZERO = 0, /* un-initialized */
     ISEQ_JIT_STATE_INTERPRETED,
     ISEQ_JIT_STATE_BLACKLISTED, /* don't try to jit */
+    ISEQ_JIT_STATE_RECOMP_BLACKLISTED, /* don't try to recompile */
     ISEQ_JIT_STATE_JITTED
 } iseq_jit_state;
+
+typedef struct iseq_jit_body_info {
+    int opt_level;
+    long recomp_count;
+    unsigned long invoke_count;
+    void *startPC;
+    struct iseq_jit_body_info *prev;
+    struct iseq_jit_body_info *next;
+} iseq_jit_body_info;
 #endif
 
 struct rb_iseq_struct {
@@ -382,6 +392,7 @@ struct rb_iseq_struct {
             void    *code;  /* address of jitted code (state == ISEQ_JIT_STATE_JITTED) */
             /* OMR:TODO: we need multiple entry points to deal with complex args */
         } u;
+        iseq_jit_body_info *body_info;
     } jit;
 #endif
 };

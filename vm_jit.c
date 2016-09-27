@@ -151,6 +151,9 @@ vm_jit_init(rb_vm_t *vm, jit_globals_t globals)
     jit->globals = globals;
 
     vm->jit = jit;
+    
+    /* Initialize options bit to 0 */
+    jit->options = 0;
 
     /* Initialize the JIT */
     rc = (jit->init_f)(vm, jit_options);
