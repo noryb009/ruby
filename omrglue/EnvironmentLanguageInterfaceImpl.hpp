@@ -54,6 +54,10 @@ public:
 
 	virtual bool isExclusiveAccessRequestWaiting() { return false; }
 
+	virtual uintptr_t relinquishExclusiveVMAccess() { return 0; }
+	virtual void      assumeExclusiveVMAccess(uintptr_t exclusiveCount) { }
+
+
 	virtual bool saveObjects(omrobjectptr_t objectPtr);
 	virtual void restoreObjects(omrobjectptr_t *objectPtrIndirect);
 
@@ -70,6 +74,9 @@ public:
 	virtual bool tryAcquireExclusiveForConcurrentKickoff(MM_ConcurrentGCStats *stats);
 	virtual void releaseExclusiveForConcurrentKickoff();
 #endif /* defined(OMR_GC_MODRON_CONCURRENT_MARK) */
+
+
+
 };
 
 #endif /* EnvironmentLanguageInterfaceImpl_HPP_ */
