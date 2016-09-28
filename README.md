@@ -28,7 +28,7 @@ modify the install location, etc.
 $ git clone https://github.com/rubyomr-preview/ruby.git --branch ruby_2_2_omr --recursive 
 $ cd ruby
 $ autoconf
-$ ./configure SPEC=<specname>
+$ ./configure SPEC=<specname> --with-omr-jit
 $ make
 $ make install
 ```
@@ -40,6 +40,29 @@ and Linux 390-64 the acceptable values for `<specname>` are:
 3. linux_ppc-64
 4. linux_390-64
 ```
+
+## Running with the JIT compiler
+
+Use the environment variable `OMR_JIT_OPTIONS` to pass options; Be sure to start the variable
+with `-Xjit:` to activate the JIT.  
+
+Some options of interest: 
+
+| `-Xjit:` option        | Description                                                          | 
+|------------------------|----------------------------------------------------------------------| 
+| `count=`_N_.           | How many times a method needs to be invoked before it is compiled.   | 
+| `verbose`              |  Outputs compilation decisions to `stdout`                           |
+| `vlog=`_file_          |  Redirect compilation decision output to _file_                      |
+| `tracefull,log=`_file_ | Produce a compilation log at _file_, suffixed with PID               |
+
+### Running without installing
+
+If you haven't run `make install`, the dynamic loader will complain. Tell it where to find 
+`librbjit` by pointing `LD_LIBRARY_PATH` to this directory.
+
+So, running `make test` without installing: 
+
+    LD_LIBRARY_PATH=$PWD OMR_JIT_OPTIONS=-Xjit:count=0 make test
 
 ## Features of Ruby
 
