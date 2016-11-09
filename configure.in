@@ -572,6 +572,8 @@ AS_IF([test "x$with_omr_jit" = "xyes"],
    #g The OMR GC provides OMR_RUBY_VALID_CLASS
    AC_DEFINE(OMR_RUBY_VALID_CLASS)
 
+   AC_SEARCH_LIBS(iconv, [iconv])
+
    # If RBJITGLUE_DIR isn't defined, set to default
    AS_IF([test "x$RBJITGLUE_DIR" = "x"],
      [RBJITGLUE_DIR="rbjitglue"],
@@ -1001,6 +1003,7 @@ if test "$GCC:${warnflags+set}:no" = yes::no; then
 	extra_warning=
     fi
     for wflag in -Wno-unused-parameter -Wno-parentheses -Wno-long-long \
+		 -Wno-return-type \
 		 -Wno-missing-field-initializers \
 		 -Wunused-variable \
 		 -Werror=pointer-arith \
@@ -1095,6 +1098,7 @@ if test "$GCC" = yes; then
 
     # suppress annoying -Wstrict-overflow warnings
     RUBY_TRY_CFLAGS(-fno-strict-overflow, [RUBY_APPEND_OPTION(XCFLAGS, -fno-strict-overflow)])
+    RUBY_TRY_CFLAGS(-Wno-return-type, [RUBY_APPEND_OPTION(XCFLAGS, -Wno-return-type)])
 
     test "${debugflags+set}" || {RUBY_TRY_CFLAGS(-ggdb3, [debugflags=-ggdb3])}
     test "${debugflags+set}" || {RUBY_TRY_CFLAGS(-ggdb, [debugflags=-ggdb])}

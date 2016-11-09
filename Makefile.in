@@ -303,7 +303,7 @@ omr-configure:
 
 omr: omr-configure
 	$(MAKE) id.h
-	$(MAKE) -C $(OMRDIR)
+	$(MAKE) -C $(OMRDIR) MODULE_CFLAGS="-Wno-error" MODULE_CXXFLAGS="-Wno-error"
 
 omr-clean:
 	-$(MAKE) -C $(OMRDIR) clean
@@ -323,7 +323,8 @@ jit-debug:
 	nice $(MAKE) $(JIT_PARAOPT) -C $(RBJITGLUE_DIR)/ruby RUBY_DIR=$(abs_srcdir) RELATIVE_OMR_DIR=$(RELATIVE_OMR_DIR) RBJITGLUE_DIR=$(RBJITGLUE_DIR) RUBY_IPATH="$(RUBY_IPATH) $(OMR_IPATH) $(OMRGLUE_IPATH)" JIT_DLL_DIR="$(JIT_SO_DIR)" BUILD_CONFIG=debug 
 
 jit-install: jit
-	$(INSTALL) -D $(JIT_SO_DIR)/$(JIT_SO_NAME) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
+	$(INSTALL) $(DESTDIR)$(libdir)
+	$(INSTALL) $(JIT_SO_DIR)/$(JIT_SO_NAME) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)
 
 jit-uninstall:
 	$(RM) $(DESTDIR)$(libdir)/$(JIT_SO_NAME)

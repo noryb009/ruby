@@ -24,7 +24,7 @@
 class MM_CollectorLanguageInterface;
 class MM_ConfigurationLanguageInterface;
 class MM_MarkingScheme;
-class OMR_VM;
+struct OMR_VM;
 class MM_VerboseManagerBase;
 
 class MM_StartupManagerImpl : public MM_StartupManager
