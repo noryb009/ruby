@@ -32,7 +32,7 @@
 
 VALUE rb_cRational;
 
-static ID id_abs, id_idiv, id_integer_p, id_negate, id_to_i,
+static ID id_abs, id_idiv, id_integer_p, id_to_i,
     id_i_num, id_i_den;
 
 #define f_boolcast(x) ((x) ? Qtrue : Qfalse)
@@ -137,7 +137,6 @@ f_abs(VALUE x)
 }
 
 fun1(integer_p)
-fun1(negate)
 
 inline static VALUE
 f_to_i(VALUE x)
@@ -415,8 +414,8 @@ nurat_s_new_bang(int argc, VALUE *argv, VALUE klass)
 	    den = f_to_i(den);
 
         if (INT_NEGATIVE_P(den)) {
-	    num = f_negate(num);
-	    den = f_negate(den);
+	    num = rb_int_uminus(num);
+	    den = rb_int_uminus(den);
         }
         else if (INT_ZERO_P(den)) {
             rb_num_zerodiv();
@@ -469,9 +468,11 @@ nurat_int_value(VALUE num)
 static void
 nurat_canonicalize(VALUE *num, VALUE *den)
 {
+    assert(num != NULL && RB_INTEGER_TYPE_P(*num));
+    assert(den != NULL && RB_INTEGER_TYPE_P(*den));
     if (INT_NEGATIVE_P(*den)) {
-	*num = f_negate(*num);
-	*den = f_negate(*den);
+        *num = rb_int_uminus(*num);
+        *den = rb_int_uminus(*den);
     }
     else if (INT_ZERO_P(*den)) {
         rb_num_zerodiv();
@@ -619,10 +620,12 @@ nurat_denominator(VALUE self)
  *
  * Negates +rat+.
  */
-static VALUE
-nurat_negate(VALUE self)
+VALUE
+rb_rational_uminus(VALUE self)
 {
+    const int unused = (assert(RB_TYPE_P(self, T_RATIONAL)), 0);
     get_dat1(self);
+    (void)unused;
     return f_rational_new2(CLASS_OF(self), rb_int_uminus(dat->num), dat->den);
 }
 
@@ -1060,8 +1063,8 @@ nurat_expt(VALUE self, VALUE other)
  *    Rational(1,3)   <=> 1               #=> -1
  *    Rational(1,3)   <=> 0.3             #=> 1
  */
-static VALUE
-nurat_cmp(VALUE self, VALUE other)
+VALUE
+rb_rational_cmp(VALUE self, VALUE other)
 {
     if (RB_INTEGER_TYPE_P(other)) {
 	{
@@ -1481,9 +1484,7 @@ nurat_round_n(int argc, VALUE *argv, VALUE self)
     enum ruby_num_rounding_mode mode = (
 	argc = rb_scan_args(argc, argv, "*:", NULL, &opt),
 	rb_num_get_rounding_option(opt));
-    VALUE (*round_func)(VALUE) =
-	ROUND_TO(mode,
-		 nurat_round_half_up, nurat_round_half_even);
+    VALUE (*round_func)(VALUE) = ROUND_FUNC(mode, nurat_round);
     return f_round_common(argc, argv, self, round_func);
 }
 
@@ -1645,7 +1646,7 @@ nurat_rationalize(int argc, VALUE *argv, VALUE self)
 	return self;
 
     if (nurat_negative_p(self))
-	return nurat_negate(nurat_rationalize(argc, argv, nurat_negate(self)));
+	return rb_rational_uminus(nurat_rationalize(argc, argv, rb_rational_uminus(self)));
 
     rb_scan_args(argc, argv, "01", &e);
     e = f_abs(e);
@@ -2201,7 +2202,7 @@ float_rationalize(int argc, VALUE *argv, VALUE self)
     double d = RFLOAT_VALUE(self);
 
     if (d < 0.0)
-        return nurat_negate(float_rationalize(argc, argv, DBL2NUM(-d)));
+        return rb_rational_uminus(float_rationalize(argc, argv, DBL2NUM(-d)));
 
     rb_scan_args(argc, argv, "01", &e);
 
@@ -2340,7 +2341,7 @@ read_num(const char **s, int numsign, int strict,
     }
 
     if (numsign == '-')
-	*num = nurat_negate(*num);
+	*num = rb_rational_uminus(*num);
     if (!NIL_P(exp)) {
 	VALUE l = f_expt10(exp);
 	*num = nurat_mul(*num, l);
@@ -2617,7 +2618,6 @@ Init_Rational(void)
     id_abs = rb_intern("abs");
     id_idiv = rb_intern("div");
     id_integer_p = rb_intern("integer?");
-    id_negate = rb_intern("-@");
     id_to_i = rb_intern("to_i");
     id_i_num = rb_intern("@numerator");
     id_i_den = rb_intern("@denominator");
@@ -2639,7 +2639,7 @@ Init_Rational(void)
     rb_define_method(rb_cRational, "numerator", nurat_numerator, 0);
     rb_define_method(rb_cRational, "denominator", nurat_denominator, 0);
 
-    rb_define_method(rb_cRational, "-@", nurat_negate, 0);
+    rb_define_method(rb_cRational, "-@", rb_rational_uminus, 0);
     rb_define_method(rb_cRational, "+", rb_rational_plus, 1);
     rb_define_method(rb_cRational, "-", nurat_sub, 1);
     rb_define_method(rb_cRational, "*", nurat_mul, 1);
@@ -2648,7 +2648,7 @@ Init_Rational(void)
     rb_define_method(rb_cRational, "fdiv", nurat_fdiv, 1);
     rb_define_method(rb_cRational, "**", nurat_expt, 1);
 
-    rb_define_method(rb_cRational, "<=>", nurat_cmp, 1);
+    rb_define_method(rb_cRational, "<=>", rb_rational_cmp, 1);
     rb_define_method(rb_cRational, "==", nurat_eqeq_p, 1);
     rb_define_method(rb_cRational, "coerce", nurat_coerce, 1);
 

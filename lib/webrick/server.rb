@@ -44,14 +44,8 @@ module WEBrick
     # block, if given.
 
     def Daemon.start
-      exit!(0) if fork
-      Process::setsid
-      exit!(0) if fork
-      Dir::chdir("/")
-      File::umask(0)
-      STDIN.reopen(IO::NULL)
-      STDOUT.reopen(IO::NULL, "w")
-      STDERR.reopen(IO::NULL, "w")
+      Process.daemon
+      File.umask(0)
       yield if block_given?
     end
   end
@@ -309,7 +303,7 @@ module WEBrick
           else
             @logger.debug "close: <address unknown>"
           end
-          sock.close unless sock.closed?
+          sock.close
         end
       }
     end
@@ -333,14 +327,7 @@ module WEBrick
     def cleanup_shutdown_pipe(shutdown_pipe)
       @shutdown_pipe = nil
       return if !shutdown_pipe
-      shutdown_pipe.each {|io|
-        if !io.closed?
-          begin
-            io.close
-          rescue IOError # another thread closed io.
-          end
-        end
-      }
+      shutdown_pipe.each(&:close)
     end
 
     def alarm_shutdown_pipe

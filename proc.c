@@ -18,7 +18,7 @@
  * versions */
 #define PROC_NEW_REQUIRES_BLOCK 0
 
-#if !defined(__GNUC__) || __GNUC__ < 5
+#if !defined(__GNUC__) || __GNUC__ < 5 || defined(__MINGW32__)
 # define NO_CLOBBERED(v) (*(volatile VALUE *)&(v))
 #else
 # define NO_CLOBBERED(v) (v)
@@ -1208,6 +1208,14 @@ proc_hash(VALUE self)
  */
 
 static VALUE
+proc_to_s(VALUE self)
+{
+    const rb_proc_t *proc;
+    GetProcPtr(self, proc);
+    return proc_to_s_(self, proc);
+}
+
+static VALUE
 proc_to_s_(VALUE self, const rb_proc_t *proc)
 {
     VALUE str = 0;
@@ -1248,14 +1256,6 @@ proc_to_s_(VALUE self, const rb_proc_t *proc)
 	OBJ_TAINT(str);
     }
     return str;
-}
-
-static VALUE
-proc_to_s(VALUE self)
-{
-    const rb_proc_t *proc;
-    GetProcPtr(self, proc);
-    return proc_to_s_(self, proc);
 }
 
 /*

@@ -36,13 +36,13 @@ typedef HWND (WINAPI FNHTMLHELP)(HWND hwndCaller, LPCSTR pszFile,
 typedef BOOL (FNENUMSYSEMCODEPAGES) (CODEPAGE_ENUMPROC, DWORD);
 VALUE cWIN32OLE;
 
-#if defined(RB_THREAD_SPECIFIC) && (defined(__CYGWIN__) || defined(__MINGW32__))
+#if defined(RB_THREAD_SPECIFIC) && (defined(__CYGWIN__))
 static RB_THREAD_SPECIFIC BOOL g_ole_initialized;
 # define g_ole_initialized_init() ((void)0)
 # define g_ole_initialized_set(val) (g_ole_initialized = (val))
 #else
 static volatile DWORD g_ole_initialized_key = TLS_OUT_OF_INDEXES;
-# define g_ole_initialized (BOOL)TlsGetValue(g_ole_initialized_key)
+# define g_ole_initialized (TlsGetValue(g_ole_initialized_key)!=0)
 # define g_ole_initialized_init() (g_ole_initialized_key = TlsAlloc())
 # define g_ole_initialized_set(val) TlsSetValue(g_ole_initialized_key, (void*)(val))
 #endif
