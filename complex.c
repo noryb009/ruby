@@ -30,7 +30,7 @@ VALUE rb_cComplex;
 static VALUE nucomp_abs(VALUE self);
 static VALUE nucomp_arg(VALUE self);
 
-static ID id_abs, id_arg, id_convert,
+static ID id_abs, id_arg,
     id_denominator, id_expt, id_fdiv,
     id_negate, id_numerator, id_quo,
     id_real_p, id_to_f, id_to_i, id_to_r,
@@ -97,12 +97,21 @@ f_div(VALUE x, VALUE y)
     return rb_funcall(x, '/', 1, y);
 }
 
-inline static VALUE
+inline static int
 f_gt_p(VALUE x, VALUE y)
 {
-    if (FIXNUM_P(x) && FIXNUM_P(y))
-	return f_boolcast(FIX2LONG(x) > FIX2LONG(y));
-    return rb_funcall(x, '>', 1, y);
+    if (RB_INTEGER_TYPE_P(x)) {
+        if (FIXNUM_P(x) && FIXNUM_P(y))
+            return (SIGNED_VALUE)x > (SIGNED_VALUE)y;
+        return RTEST(rb_int_gt(x, y));
+    }
+    else if (RB_FLOAT_TYPE_P(x))
+        return RTEST(rb_float_gt(x, y));
+    else if (RB_TYPE_P(x, T_RATIONAL)) {
+        int const cmp = rb_cmpint(rb_rational_cmp(x, y), x, y);
+        return cmp > 0;
+    }
+    return RTEST(rb_funcall(x, '>', 1, y));
 }
 
 inline static VALUE
@@ -144,7 +153,27 @@ f_sub(VALUE x, VALUE y)
 fun1(abs)
 fun1(arg)
 fun1(denominator)
-fun1(negate)
+
+static VALUE nucomp_negate(VALUE self);
+
+inline static VALUE
+f_negate(VALUE x)
+{
+    if (RB_INTEGER_TYPE_P(x)) {
+        return rb_int_uminus(x);
+    }
+    else if (RB_FLOAT_TYPE_P(x)) {
+        return rb_float_uminus(x);
+    }
+    else if (RB_TYPE_P(x, T_RATIONAL)) {
+        return rb_rational_uminus(x);
+    }
+    else if (RB_TYPE_P(x, T_COMPLEX)) {
+        return nucomp_negate(x);
+    }
+    return rb_funcall(x, id_negate, 0);
+}
+
 fun1(numerator)
 fun1(real_p)
 
@@ -386,6 +415,8 @@ f_complex_new2(VALUE klass, VALUE x, VALUE y)
     return nucomp_s_canonicalize_internal(klass, x, y);
 }
 
+static VALUE nucomp_s_convert(int argc, VALUE *argv, VALUE klass);
+
 /*
  * call-seq:
  *    Complex(x[, y])  ->  numeric
@@ -422,7 +453,7 @@ f_complex_new2(VALUE klass, VALUE x, VALUE y)
 static VALUE
 nucomp_f_complex(int argc, VALUE *argv, VALUE klass)
 {
-    return rb_funcallv(rb_cComplex, id_convert, argc, argv);
+    return nucomp_s_convert(argc, argv, rb_cComplex);
 }
 
 #define imp1(n) \
@@ -432,20 +463,9 @@ m_##n##_bang(VALUE x)\
     return rb_math_##n(x);\
 }
 
-#define imp2(n) \
-inline static VALUE \
-m_##n##_bang(VALUE x, VALUE y)\
-{\
-    return rb_math_##n(x, y);\
-}
-
-imp2(atan2)
 imp1(cos)
 imp1(cosh)
 imp1(exp)
-imp2(hypot)
-
-#define m_hypot(x,y) m_hypot_bang((x),(y))
 
 static VALUE
 m_log_bang(VALUE x)
@@ -928,7 +948,7 @@ nucomp_expt(VALUE self, VALUE other)
 	    }
 	    return z;
 	}
-	return f_expt(f_reciprocal(self), f_negate(other));
+	return f_expt(f_reciprocal(self), rb_int_uminus(other));
     }
     if (k_numeric_p(other) && f_real_p(other)) {
 	VALUE r, theta;
@@ -1015,7 +1035,7 @@ nucomp_abs(VALUE self)
 	    a = f_to_f(a);
 	return a;
     }
-    return m_hypot(dat->real, dat->imag);
+    return rb_math_hypot(dat->real, dat->imag);
 }
 
 /*
@@ -1049,7 +1069,7 @@ static VALUE
 nucomp_arg(VALUE self)
 {
     get_dat1(self);
-    return m_atan2_bang(dat->imag, dat->real);
+    return rb_math_atan2(dat->imag, dat->real);
 }
 
 /*
@@ -1416,8 +1436,6 @@ rb_complex_polar(VALUE x, VALUE y)
 {
     return f_complex_polar(rb_cComplex, x, y);
 }
-
-static VALUE nucomp_s_convert(int argc, VALUE *argv, VALUE klass);
 
 VALUE
 rb_Complex(VALUE x, VALUE y)
@@ -2173,7 +2191,6 @@ Init_Complex(void)
 
     id_abs = rb_intern("abs");
     id_arg = rb_intern("arg");
-    id_convert = rb_intern("convert");
     id_denominator = rb_intern("denominator");
     id_expt = rb_intern("**");
     id_fdiv = rb_intern("fdiv");

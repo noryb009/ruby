@@ -1151,8 +1151,14 @@ enum ruby_num_rounding_mode {
     RUBY_NUM_ROUND_HALF_EVEN,
     RUBY_NUM_ROUND_DEFAULT = ROUND_DEFAULT
 };
-#define ROUND_TO(mode, up, even) \
-    ((mode) == RUBY_NUM_ROUND_HALF_EVEN ? even : up)
+#define ROUND_TO(mode, even, up) \
+    ((mode) == RUBY_NUM_ROUND_HALF_EVEN ? even : \
+     up)
+#define ROUND_FUNC(mode, name) \
+    ROUND_TO(mode, name##_half_even, name##_half_up)
+#define ROUND_CALL(mode, name, args) \
+    ROUND_TO(mode, name##_half_even args, \
+	     name##_half_up args)
 
 int rb_num_to_uint(VALUE val, unsigned int *ret);
 VALUE ruby_num_interval_step_size(VALUE from, VALUE to, VALUE step, int excl);
@@ -1162,6 +1168,7 @@ int rb_num_negative_p(VALUE);
 VALUE rb_int_succ(VALUE num);
 VALUE rb_int_pred(VALUE num);
 VALUE rb_int_uminus(VALUE num);
+VALUE rb_float_uminus(VALUE num);
 VALUE rb_int_plus(VALUE x, VALUE y);
 VALUE rb_int_minus(VALUE x, VALUE y);
 VALUE rb_int_mul(VALUE x, VALUE y);
@@ -1171,6 +1178,8 @@ VALUE rb_int_round(VALUE num, int ndigits, enum ruby_num_rounding_mode mode);
 VALUE rb_int2str(VALUE num, int base);
 VALUE rb_dbl_hash(double d);
 VALUE rb_fix_plus(VALUE x, VALUE y);
+VALUE rb_int_gt(VALUE x, VALUE y);
+VALUE rb_float_gt(VALUE x, VALUE y);
 VALUE rb_int_ge(VALUE x, VALUE y);
 enum ruby_num_rounding_mode rb_num_get_rounding_option(VALUE opts);
 double rb_int_fdiv_double(VALUE x, VALUE y);
@@ -1372,11 +1381,13 @@ rb_pid_t rb_fork_ruby(int *status);
 void rb_last_status_clear(void);
 
 /* rational.c */
+VALUE rb_rational_uminus(VALUE self);
 VALUE rb_rational_plus(VALUE self, VALUE other);
 VALUE rb_lcm(VALUE x, VALUE y);
 VALUE rb_rational_reciprocal(VALUE x);
 VALUE rb_cstr_to_rat(const char *, int);
 VALUE rb_rational_abs(VALUE self);
+VALUE rb_rational_cmp(VALUE self, VALUE other);
 
 /* re.c */
 VALUE rb_reg_compile(VALUE str, int options, const char *sourcefile, int sourceline);
