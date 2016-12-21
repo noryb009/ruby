@@ -23,4 +23,24 @@ class MSpecScript
     #{srcdir}/tool/runruby.rb --archdir=#{Dir.pwd} --extout=#{config['EXTOUT']}
     --
   ]
+
+  # These fail from an upstream Ruby issue.
+  set :xpatterns, [
+    'Float#round returns big values rounded to nearest',
+    'Integer#round returns itself rounded to nearest if passed a negative value',
+    'Kernel#clone returns nil for NilClass',
+    'Kernel#clone returns true for TrueClass',
+    'Kernel#clone returns false for FalseClass',
+    'Kernel#clone returns the same Integer for Integer',
+    'Kernel#clone returns the same Symbol for Symbol',
+    'Kernel#dup returns nil for NilClass',
+    'Kernel#dup returns true for TrueClass',
+    'Kernel#dup returns false for FalseClass',
+    'Kernel#dup returns the same Integer for Integer',
+    'Kernel#dup returns the same Symbol for Symbol',
+    'Rational#round with no arguments (precision = 0) returns the rounded value toward the nearest integer',
+    'Time#strftime rounds an offset to the nearest second when formatting with %z',
+    'BigDecimal#inspect looks like this',
+    'BigDecimal.new raises ArgumentError for invalid strings'
+  ]
 end
